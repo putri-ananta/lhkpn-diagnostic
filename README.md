@@ -1,21 +1,37 @@
-<<<<<<< HEAD
-# React + Vite
+# LHKPN Financial Diagnostic
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+A web application for financial health diagnosis based on LHKPN (Laporan Harta Possesi Pejabat Negara) asset declarations. This tool analyzes Indonesian official asset reports to compute key financial ratios and provide diagnostic insights.
 
-Currently, two official plugins are available:
+## Features
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+- **Single File Analysis** — Upload a single LHKPN PDF for instant diagnosis
+- **Batch Processing** — Analyze multiple LHKPN documents simultaneously
+- **PDF Parsing** — Client-side PDF parsing using pdf.js (no server required)
+- **OCR Fallback** — Tesseract.js integration for scanned PDF documents
+- **Financial Metrics** — Calculates DAR, CAR, Property Concentration, Depreciating Asset Ratio, and Productive Asset Ratio
+- **Light/Dark Mode** — Theme toggle with system preference detection and localStorage persistence
 
-## React Compiler
+## How It Works
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+1. Upload an LHKPN PDF file (or use sample data for testing)
+2. The parser extracts asset values from the document
+3. The financial engine computes diagnostic ratios
+4. Results are displayed with color-coded status indicators
 
-## Expanding the Oxlint configuration
+## Stack
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and Oxlint's TypeScript related rules in your project.
-=======
-# lhkpn-diagnostic
-Financial Diagnostic based on LHKPN
->>>>>>> origin/main
+- React 19 + Vite
+- pdf.js v6.3.289 for PDF parsing
+- tesseract.js v7.0.0 for OCR fallback
+- Pure CSS design system (keu-ui)
+
+## Installation
+
+```bash
+npm install
+npm run dev
+```
+
+## License
+
+MIT
