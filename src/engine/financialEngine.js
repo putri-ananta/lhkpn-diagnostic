@@ -718,6 +718,151 @@ export function generateKeyFindings(metrics, assets, integrity) {
 }
 
 /**
+ * Generates deterministic diagnostic summary with actionable insights
+ */
+export function computeDiagnosticSummary(metrics, assets, integrity) {
+  const dar = metrics.find(m => m.key === 'dar');
+  const car = metrics.find(m => m.key === 'car');
+  const prop = metrics.find(m => m.key === 'property');
+  const dep = metrics.find(m => m.key === 'depreciating');
+  const prod = metrics.find(m => m.key === 'productive');
+
+  const insights = [];
+  const recommendations = [];
+
+  // Liquidity assessment
+  if (car && car.ratio !== null) {
+    const carPct = car.ratio * 100;
+    if (carPct < 2) {
+      insights.push({ type: 'critical', text: `Likuiditas sangat rendah (${carPct.toFixed(1)}%). Sebagian besar kekayaan terkunci di aset tidak likuid.` });
+      recommendations.push({ type: 'action', text: 'Tingkatkan likuiditas kas minimal 5% dari total aset untuk dana darurat.' });
+    } else if (carPct < 5) {
+      insights.push({ type: 'warning', text: `Likuiditas rendah (${carPct.toFixed(1)}%). Cadangan kas terbatas.` });
+      recommendations.push({ type: 'suggestion', text: 'Pertimbangkan mengalokasikan sebagian aset ke instrumen cair.' });
+    } else if (carPct <= 15) {
+      insights.push({ type: 'good', text: `Likuiditas ideal (${carPct.toFixed(1)}%). Keseimbangan kas terjaga.` });
+    } else if (carPct <= 25) {
+      insights.push({ type: 'caution', text: `Kas cukup dominan (${carPct.toFixed(1)}%). Potensi inflasi mengurangi daya beli.` });
+      recommendations.push({ type: 'suggestion', text: 'Diversifikasi sebagian kas ke aset produktif.' });
+    } else {
+      insights.push({ type: 'warning', text: `Kas berlebihan (${carPct.toFixed(1)}%). Risiko inflasi signifikan.` });
+      recommendations.push({ type: 'action', text: 'Alokasikan kas berlebih ke surat berharga atau aset produktif.' });
+    }
+  }
+
+  // Debt assessment
+  if (dar && dar.ratio !== null) {
+    const darPct = dar.ratio * 100;
+    if (darPct === 0) {
+      insights.push({ type: 'good', text: 'Utang nihil (0%). Aset 100% bersih dari liabilitas.' });
+    } else if (darPct <= 5) {
+      insights.push({ type: 'good', text: `Utang terkendali (${darPct.toFixed(1)}%). Rasio utang aman.` });
+    } else if (darPct <= 30) {
+      insights.push({ type: 'warning', text: `Utang cukup signifikan (${darPct.toFixed(1)}%). Pantau perkembangan liabilitas.` });
+      recommendations.push({ type: 'suggestion', text: 'Prioritaskan pembayaran utang berbunga tinggi.' });
+    } else {
+      insights.push({ type: 'critical', text: `Utang ekstrem (${darPct.toFixed(1)}%). Mayoritas aset terbebani.` });
+      recommendations.push({ type: 'action', text: 'Segera restrukturisasi utang dan tingkatkan pendapatan.' });
+    }
+  }
+
+  // Property concentration
+  if (prop && prop.ratio !== null) {
+    const propPct = prop.ratio * 100;
+    if (propPct > 80) {
+      insights.push({ type: 'critical', text: `Konsentrasi properti sangat tinggi (${propPct.toFixed(1)}%). Fleksibilitas likuiditas terbatas.` });
+      recommendations.push({ type: 'action', text: 'Diversifikasi ke aset produktif untuk mengurangi konsentrasi properti.' });
+    } else if (propPct > 60) {
+      insights.push({ type: 'warning', text: `Proporsi properti dominan (${propPct.toFixed(1)}%). Perlu diversifikasi.` });
+      recommendations.push({ type: 'suggestion', text: 'Pertimbangkan investasi saham/reksadana untuk diversifikasi.' });
+    } else if (propPct >= 40) {
+      insights.push({ type: 'good', text: `Proporsi properti seimbang (${propPct.toFixed(1)}%). Komposisi aset sehat.` });
+    } else if (propPct < 20) {
+      insights.push({ type: 'caution', text: `Properti rendah (${propPct.toFixed(1)}%). Belum ada akumulasi aset properti.` });
+    }
+  }
+
+  // Productive assets
+  if (prod && prod.ratio !== null) {
+    const prodPct = prod.ratio * 100;
+    if (prodPct === 0) {
+      insights.push({ type: 'critical', text: 'Tidak ada investasi surat berharga. Kekayaan belum bertumbuh secara optimal.' });
+      recommendations.push({ type: 'action', text: 'Mulai alokasi minimal 20% aset ke instrumen pasar modal (saham, obligasi, reksadana).' });
+    } else if (prodPct < 20) {
+      insights.push({ type: 'warning', text: `Investasi produktif rendah (${prodPct.toFixed(1)}%). Belum memenuhi target diversifikasi.` });
+      recommendations.push({ type: 'suggestion', text: 'Tingkatkan alokasi surat berharga ke minimum 20% dari total aset.' });
+    } else if (prodPct <= 50) {
+      insights.push({ type: 'good', text: `Aset produktif memadai (${prodPct.toFixed(1)}%). Diversifikasi pasar modal terpenuhi.` });
+    } else {
+      insights.push({ type: 'good', text: `Dominan investasi (${prodPct.toFixed(1)}%). Portofolio sangat aktif.` });
+    }
+  }
+
+  // Depreciating assets
+  if (dep && dep.ratio !== null) {
+    const depPct = dep.ratio * 100;
+    if (depPct > 40) {
+      insights.push({ type: 'warning', text: `Aset menyusut dominan (${depPct.toFixed(1)}%). Nilai aset cenderung menurun setiap tahun.` });
+      recommendations.push({ type: 'suggestion', text: 'Pertimbangkan konversi aset menyusut ke aset produktif atau properti.' });
+    } else if (depPct > 20) {
+      insights.push({ type: 'caution', text: `Porsi aset menyusut moderat (${depPct.toFixed(1)}%). Perlu perhatian.` });
+    } else {
+      insights.push({ type: 'good', text: `Aset menyusut terkendali (${depPct.toFixed(1)}%). Komposisi aset stabil.` });
+    }
+  }
+
+  // Data integrity
+  if (!integrity.isConsistent) {
+    insights.unshift({ type: 'critical', text: 'Inkonsistensi data ekstraksi terdeteksi. Hasil analisis mungkin tidak akurat.' });
+    recommendations.unshift({ type: 'action', text: 'Tinjau ulang dokumen LHKPN asli dan koreksi nilai yang salah ekstraksi.' });
+  }
+
+  // Overall scoring (0-100, higher is better)
+  let score = 50; // Base score
+  if (car && car.ratio !== null) {
+    const carPct = car.ratio * 100;
+    if (carPct >= 5 && carPct <= 15) score += 15;
+    else if (carPct >= 2 && carPct <= 25) score += 8;
+    else score -= 10;
+  }
+  if (dar && dar.ratio !== null) {
+    const darPct = dar.ratio * 100;
+    if (darPct === 0) score += 15;
+    else if (darPct <= 5) score += 10;
+    else if (darPct <= 30) score -= 10;
+    else score -= 20;
+  }
+  if (prod && prod.ratio !== null) {
+    const prodPct = prod.ratio * 100;
+    if (prodPct >= 20 && prodPct <= 50) score += 15;
+    else if (prodPct > 0) score += 5;
+    else score -= 15;
+  }
+  if (prop && prop.ratio !== null) {
+    const propPct = prop.ratio * 100;
+    if (propPct >= 40 && propPct <= 60) score += 10;
+    else if (propPct > 80) score -= 10;
+  }
+  if (!integrity.isConsistent) score -= 15;
+
+  score = Math.max(0, Math.min(100, score));
+
+  let grade = 'C';
+  if (score >= 80) grade = 'A';
+  else if (score >= 65) grade = 'B';
+  else if (score >= 50) grade = 'C';
+  else if (score >= 35) grade = 'D';
+  else grade = 'E';
+
+  return {
+    score,
+    grade,
+    insights,
+    recommendations
+  };
+}
+
+/**
  * Main entrance for complete Financial Diagnosis
  */
 export function runFinancialDiagnosis(extractedData) {
@@ -741,6 +886,7 @@ export function runFinancialDiagnosis(extractedData) {
   const narrativeSummary = generateNarrativeSummary(metrics, assets);
   const portfolioProfile = generatePortfolioProfile(metrics, assets);
   const keyFindings = generateKeyFindings(metrics, assets, integrity);
+  const diagnosticSummary = computeDiagnosticSummary(metrics, assets, integrity);
 
   return {
     identity: extractedData.identity || {},
@@ -755,6 +901,7 @@ export function runFinancialDiagnosis(extractedData) {
     portfolioProfile,
     keyFindings,
     disclaimer:
-      'PEMBERITAHUAN LEPAS TANGGUNG JAWAB (DISCLAIMER): Diagnosis finansial ini dihasilkan secara terstruktur dan deterministik dari angka-angka yang dilaporkan dalam dokumen LHKPN. Hasil analisis ini murni berbentuk informasi diagnostik mengenai struktur portofolio keuangan dan TIDAK menyatakan atau mencerminkan temuan tindak pidana, korupsi, pencucian uang, atau pelanggaran hukum apapun.'
+      'PEMBERITAHUAN LEPAS TANGGUNG JAWAB (DISCLAIMER): Diagnosis finansial ini dihasilkan secara terstruktur dan deterministik dari angka-angka yang dilaporkan dalam dokumen LHKPN. Hasil analisis ini murni berbentuk informasi diagnostik mengenai struktur portofolio keuangan dan TIDAK menyatakan atau mencerminkan temuan tindak pidana, korupsi, pencucian uang, atau pelanggaran hukum apapun.',
+    diagnosticSummary
   };
 }

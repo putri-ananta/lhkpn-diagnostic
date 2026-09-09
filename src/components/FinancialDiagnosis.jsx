@@ -1,5 +1,5 @@
 import React from 'react';
-import { User, Building, Calendar, AlertTriangle, ShieldCheck, PieChart, FileText, ArrowLeft } from 'lucide-react';
+import { User, Building, Calendar, AlertTriangle, ShieldCheck, PieChart, FileText, ArrowLeft, Lightbulb, CheckCircle2, XCircle } from 'lucide-react';
 import { formatCurrency, formatPercent } from '../utils/formatting';
 import { runFinancialDiagnosis } from '../engine/financialEngine';
 import { FinancialMetricCard } from './FinancialMetricCard';
@@ -11,7 +11,7 @@ export function FinancialDiagnosis({ extractedData, onBack }) {
   if (!extractedData) return null;
 
   const diagnosis = runFinancialDiagnosis(extractedData);
-  const { identity, assets, categoryDetails, itemized, metrics, integrity, overallStatus, narrativeSummary, portfolioProfile, keyFindings, disclaimer } = diagnosis;
+  const { identity, assets, categoryDetails, itemized, metrics, integrity, overallStatus, narrativeSummary, portfolioProfile, keyFindings, disclaimer, diagnosticSummary } = diagnosis;
 
   const getStatusBadge = (status) => {
     switch (status) {
@@ -140,6 +140,75 @@ export function FinancialDiagnosis({ extractedData, onBack }) {
               ))}
             </ul>
           </div>
+        </div>
+      )}
+
+      {/* SECTION 3.5: DIAGNOSTIC SCORE & INSIGHTS */}
+      {diagnosticSummary && diagnosticSummary.score !== undefined && (
+        <div className="keu-card">
+          <div className="keu-card-header">
+            <h3 className="keu-card-title">
+              <Lightbulb size={20} color="#fbbf24" />
+              Skor Diagnostik & Rekomendasi
+            </h3>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', padding: '0.375rem 1rem', borderRadius: 'var(--keu-radius-full)', fontSize: '1.25rem', fontWeight: 800, backgroundColor: diagnosticSummary.score >= 70 ? '#34d39920' : diagnosticSummary.score >= 50 ? '#fbbf2420' : '#f8717120', color: diagnosticSummary.score >= 70 ? '#34d399' : diagnosticSummary.score >= 50 ? '#fbbf24' : '#f87171' }}>
+              {diagnosticSummary.grade}
+              <span style={{ fontSize: '0.75rem', fontWeight: 500, opacity: 0.8 }}>{diagnosticSummary.score}/100</span>
+            </span>
+          </div>
+          
+          {/* Insights */}
+          {diagnosticSummary.insights.length > 0 && (
+            <div style={{ padding: '0.75rem 0.75rem 0.5rem' }}>
+              <h4 style={{ fontSize: '0.8125rem', color: 'var(--keu-text-muted)', marginBottom: '0.5rem', fontWeight: 600 }}>
+                ANALISIS KESEHATAN KEUANGAN:
+              </h4>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                {diagnosticSummary.insights.map((insight, idx) => {
+                  const colors = {
+                    critical: '#f87171',
+                    warning: '#f59e0b',
+                    caution: '#fbbf24',
+                    good: '#34d399'
+                  };
+                  const icons = {
+                    critical: <XCircle size={16} />,
+                    warning: <AlertTriangle size={16} />,
+                    caution: <Lightbulb size={16} />,
+                    good: <CheckCircle2 size={16} />
+                  };
+                  return (
+                    <div key={idx} style={{ display: 'flex', gap: '0.625rem', padding: '0.625rem 0.75rem', borderRadius: 'var(--keu-radius-sm)', backgroundColor: `${colors[insight.type]}10`, border: `1px solid ${colors[insight.type]}30` }}>
+                      <span style={{ color: colors[insight.type], flexShrink: 0, marginTop: '2px' }}>{icons[insight.type]}</span>
+                      <span style={{ fontSize: '0.875rem', color: 'var(--keu-text-main)', lineHeight: 1.5 }}>{insight.text}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+          
+          {/* Recommendations */}
+          {diagnosticSummary.recommendations.length > 0 && (
+            <div style={{ padding: '0.5rem 0.75rem 0.75rem' }}>
+              <h4 style={{ fontSize: '0.8125rem', color: 'var(--keu-text-muted)', marginBottom: '0.5rem', fontWeight: 600 }}>
+                REKOMENDASI TINDAK LANJUT:
+              </h4>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                {diagnosticSummary.recommendations.map((rec, idx) => {
+                  const isAction = rec.type === 'action';
+                  return (
+                    <div key={idx} style={{ display: 'flex', gap: '0.625rem', padding: '0.625rem 0.75rem', borderRadius: 'var(--keu-radius-sm)', backgroundColor: isAction ? '#3b82f610' : '#60a5fa10', border: `1px solid ${isAction ? '#3b82f630' : '#60a5fa30'}` }}>
+                      <span style={{ fontSize: '0.75rem', fontWeight: 700, color: isAction ? '#3b82f6' : '#60a5fa', flexShrink: 0, minWidth: '60px', textAlign: 'center', padding: '0.125rem 0.375rem', borderRadius: 'var(--keu-radius-full)', backgroundColor: isAction ? '#3b82f620' : '#60a5fa20' }}>
+                        {isAction ? 'AKSI' : 'SARAN'}
+                      </span>
+                      <span style={{ fontSize: '0.875rem', color: 'var(--keu-text-main)', lineHeight: 1.5 }}>{rec.text}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
