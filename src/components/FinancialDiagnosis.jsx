@@ -1,11 +1,15 @@
 import React from 'react';
-import { User, Building, Calendar, AlertTriangle, ShieldCheck, PieChart, FileText, ArrowLeft, Lightbulb, CheckCircle2, XCircle } from 'lucide-react';
+import { User, Building, Calendar, AlertTriangle, ShieldCheck, PieChart, FileText, ArrowLeft, Lightbulb, CheckCircle2, XCircle, BarChart3, Activity } from 'lucide-react';
 import { formatCurrency, formatPercent } from '../utils/formatting';
 import { runFinancialDiagnosis } from '../engine/financialEngine';
 import { FinancialMetricCard } from './FinancialMetricCard';
 import { AssetComposition } from './AssetComposition';
 import { PersonalFinanceSimulation } from './PersonalFinanceSimulation';
 import { LHKPNDetail } from './LHKPNDetail';
+import { AssetDoughnutChart } from './charts/AssetDoughnutChart';
+import { MetricBarChart } from './charts/MetricBarChart';
+import { FinancialRadarChart } from './charts/FinancialRadarChart';
+import { WealthPolarChart } from './charts/WealthPolarChart';
 
 export function FinancialDiagnosis({ extractedData, onBack }) {
   if (!extractedData) return null;
@@ -228,6 +232,54 @@ export function FinancialDiagnosis({ extractedData, onBack }) {
           {metrics.map((metric) => (
             <FinancialMetricCard key={metric.key} metric={metric} />
           ))}
+        </div>
+      </div>
+
+      {/* SECTION 4.5: CHART VISUALIZATIONS */}
+      <div className="keu-card">
+        <div className="keu-card-header">
+          <h3 className="keu-card-title">
+            <BarChart3 size={18} color="#60a5fa" />
+            Visualisasi Finansial
+          </h3>
+          <span className="keu-badge keu-badge-info">Chart.js</span>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '1.5rem', padding: '1.25rem' }}>
+          {/* Asset Composition Doughnut */}
+          <div>
+            <h4 style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--keu-text-muted)', marginBottom: '1rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+              Komposisi Aset
+            </h4>
+            <AssetDoughnutChart assets={assets} size={260} />
+          </div>
+
+          {/* Metric Comparison Bar Chart */}
+          <div>
+            <h4 style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--keu-text-muted)', marginBottom: '1rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+              Perbandingan Rasio
+            </h4>
+            <MetricBarChart metrics={metrics} />
+          </div>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '1.5rem', padding: '0 1.25rem 1.25rem', borderTop: '1px solid var(--keu-border)', marginTop: '0.5rem', paddingTop: '1.5rem' }}>
+          {/* Financial Health Radar */}
+          <div>
+            <h4 style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--keu-text-muted)', marginBottom: '1rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+              <Activity size={14} style={{ marginRight: '0.375rem', verticalAlign: 'middle' }} />
+              Kesehatan Finansial
+            </h4>
+            <FinancialRadarChart metrics={metrics} />
+          </div>
+
+          {/* Wealth Polar Chart */}
+          <div>
+            <h4 style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--keu-text-muted)', marginBottom: '1rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+              Profil Kekayaan
+            </h4>
+            <WealthPolarChart assets={assets} />
+          </div>
         </div>
       </div>
 

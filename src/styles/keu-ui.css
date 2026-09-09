@@ -517,11 +517,11 @@ body {
 }
 
 .keu-table th {
-  background-color: rgba(15, 23, 42, 0.6);
-  color: var(--keu-text-muted);
+  background-color: var(--keu-brand-primary);
+  color: #ffffff;
   font-weight: 600;
   padding: 0.875rem 1rem;
-  border-bottom: 1px solid var(--keu-border-subtle);
+  border-bottom: 1px solid var(--keu-border-strong);
   white-space: nowrap;
   user-select: none;
 }
@@ -531,7 +531,8 @@ body {
 }
 
 .keu-table th.sortable:hover {
-  color: var(--keu-text-main);
+  background-color: var(--keu-brand-hover);
+  color: #ffffff;
 }
 
 .keu-table td {
