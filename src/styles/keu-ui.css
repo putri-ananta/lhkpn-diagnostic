@@ -145,6 +145,12 @@ body {
   z-index: 40;
 }
 
+[data-theme="light"] .keu-header {
+  background-color: rgba(255, 255, 255, 0.9);
+  border-bottom: 1px solid var(--keu-border-subtle);
+  box-shadow: var(--keu-shadow-sm);
+}
+
 .keu-header-inner {
   max-width: 1280px;
   margin: 0 auto;
@@ -218,6 +224,10 @@ body {
   background-color: rgba(255, 255, 255, 0.05);
 }
 
+[data-theme="light"] .keu-tab-btn:hover {
+  background-color: var(--keu-surface-hover);
+}
+
 .keu-tab-btn.active {
   background-color: var(--keu-brand-primary);
   color: #ffffff;
@@ -275,6 +285,10 @@ body {
   border-color: var(--keu-border-strong);
 }
 
+
+[data-theme="light"] .keu-btn-outline:hover:not(:disabled) {
+  background-color: var(--keu-surface-hover);
+}
 .keu-btn-outline:hover:not(:disabled) {
   background-color: rgba(255, 255, 255, 0.08);
   border-color: var(--keu-text-muted);
@@ -412,14 +426,23 @@ body {
   border-radius: var(--keu-radius-lg);
   padding: 3rem 2rem;
   text-align: center;
-  background-color: rgba(30, 41, 59, 0.4);
+  background-color: rgba(15, 23, 42, 0.05);
   cursor: pointer;
   transition: all 0.2s ease;
 }
 
 .keu-uploader-dropzone:hover, .keu-uploader-dropzone.drag-active {
   border-color: var(--keu-brand-primary);
-  background-color: rgba(37, 99, 235, 0.08);
+  background-color: rgba(37, 99, 235, 0.05);
+}
+
+[data-theme="light"] .keu-uploader-dropzone {
+  background-color: rgba(248, 250, 252, 0.8);
+}
+
+[data-theme="light"] .keu-uploader-dropzone:hover,
+[data-theme="light"] .keu-uploader-dropzone.drag-active {
+  background-color: rgba(37, 99, 235, 0.05);
 }
 
 /* Metric Dashboard Grid */
