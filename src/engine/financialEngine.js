@@ -392,6 +392,12 @@ export function normalizeFinancialData(extractedData) {
     return extractedData;
   }
 
+  // A failed document parse may contain only a subset of the six LHKPN asset
+  // categories. Do not turn that partial set into an apparently valid subtotal.
+  if (extractedData.isParsedSuccess === false) {
+    return extractedData;
+  }
+
   const { subtotal, wasComputed } = resolveSubtotalFromCategories(extractedData.assets);
   if (subtotal === null) {
     return extractedData;
@@ -891,6 +897,9 @@ export function runFinancialDiagnosis(extractedData) {
   return {
     identity: extractedData.identity || {},
     assets,
+    isParsedSuccess: extractedData.isParsedSuccess,
+    parseStatus: extractedData.status,
+    errorReason: extractedData.errorReason,
     categoryDetails: extractedData.categoryDetails || {},
     itemized: extractedData.itemized || {},
     metadata: extractedData.metadata || {},

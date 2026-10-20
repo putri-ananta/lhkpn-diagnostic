@@ -26,7 +26,9 @@ export function parseIndonesianMoney(raw) {
   }
 
   // Check for dash/zero patterns like "----", "Rp. ----", "Rp ----", "0", "-"
-  const strippedDashes = rawText.replace(/Rp\.?/gi, '').replace(/\s+/g, '');
+  const strippedDashes = rawText
+    .replace(/R\s*p\s*[.,:]?/gi, '')
+    .replace(/\s+/g, '');
   if (/^[-—–]+$/.test(strippedDashes) || strippedDashes === '0') {
     return { value: 0, rawText, isZeroPattern: true };
   }
@@ -35,7 +37,7 @@ export function parseIndonesianMoney(raw) {
   // Indonesian format uses '.' as thousands separator and ',' as decimal separator
   // Remove Rp., dots, spaces
   let cleaned = rawText
-    .replace(/Rp\.?/gi, '')
+    .replace(/R\s*p\s*[.,:]?/gi, '')
     .replace(/\./g, '')
     .replace(/\s+/g, '')
     .replace(/,/g, '.');

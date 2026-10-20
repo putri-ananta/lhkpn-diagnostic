@@ -15,7 +15,7 @@ export function FinancialDiagnosis({ extractedData, onBack }) {
   if (!extractedData) return null;
 
   const diagnosis = runFinancialDiagnosis(extractedData);
-  const { identity, assets, categoryDetails, itemized, metrics, integrity, overallStatus, narrativeSummary, portfolioProfile, keyFindings, disclaimer, diagnosticSummary } = diagnosis;
+  const { identity, assets, isParsedSuccess, errorReason, categoryDetails, itemized, metrics, integrity, overallStatus, narrativeSummary, portfolioProfile, keyFindings, disclaimer, diagnosticSummary } = diagnosis;
 
   const getStatusBadge = (status) => {
     switch (status) {
@@ -42,6 +42,16 @@ export function FinancialDiagnosis({ extractedData, onBack }) {
           <span className={`keu-badge ${getStatusBadge(overallStatus)}`}>
             Status: {overallStatus}
           </span>
+        </div>
+      )}
+
+      {isParsedSuccess === false && (
+        <div className="keu-alert keu-alert-warning">
+          <AlertTriangle size={20} />
+          <div>
+            <strong>Dokumen perlu ditinjau:</strong>{' '}
+            {errorReason || 'Sebagian data LHKPN tidak dapat dibaca dengan yakin. Periksa detail ekstraksi sebelum memakai hasil diagnosis.'}
+          </div>
         </div>
       )}
 

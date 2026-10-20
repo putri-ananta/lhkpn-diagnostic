@@ -15,7 +15,11 @@ import {
   normalizeFinancialData
 } from './financialEngine';
 import { parseIndonesianMoney, formatCurrency, formatPercent } from '../utils/formatting';
-import { groupTextItemsIntoLines } from './lhkpnParser';
+import {
+  extractCategoryValuesFromLines,
+  extractIdentityFromLines,
+  groupTextItemsIntoLines
+} from './lhkpnParser';
 
 describe('PDF text layout parsing', () => {
   it('orders text by reading position instead of PDF item order', () => {
@@ -28,6 +32,92 @@ describe('PDF text layout parsing', () => {
 
     expect(lines).toEqual(['TANAH Rp. 200.000', 'KAS Rp. 100.000']);
   });
+
+  it('does not let a large title merge separate body lines', () => {
+    const lines = groupTextItemsIntoLines([
+      { str: 'PENGUMUMAN', x: 20, y: 760, height: 30 },
+      { str: 'A. TANAH DAN BANGUNAN', x: 20, y: 720, height: 10 },
+      { str: 'Rp. 6.177.000.000', x: 320, y: 714, height: 10 }
+    ]);
+
+    expect(lines).toEqual([
+      'PENGUMUMAN',
+      'A. TANAH DAN BANGUNAN',
+      'Rp. 6.177.000.000'
+    ]);
+  });
+
+  it('reads official KPK split-line totals without using item or neighbouring values', () => {
+    const extracted = extractCategoryValuesFromLines([
+      'II. DATA HARTA',
+      'A.',
+      'TANAH DAN BANGUNAN',
+      'Rp.',
+      '6.177.000.000',
+      '1.',
+      'Tanah Seluas 224 m2, HASIL SENDIRI Rp. 750.000.000',
+      'B. ALAT TRANSPORTASI DAN MESIN',
+      'Rp. 815.000.000',
+      '1. MOBIL, TOYOTA Tahun 1997, HASIL SENDIRI Rp. 40.000.000',
+      'C. HARTA BERGERAK LAINNYA Rp. 117.500.000',
+      'D. SURAT BERHARGA',
+      'Rp. ----',
+      'E. KAS DAN SETARA KAS',
+      'R p . 105.900.000',
+      'F. HARTA LAINNYA Rp. 225.188.000',
+      'Sub Total',
+      'Rp.',
+      '7.440.588.000',
+      'III. HUTANG',
+      'Rp. 62.390.867',
+      'IV. TOTAL HARTA KEKAYAAN (II-III)',
+      'Rp. 7.378.197.133'
+    ]);
+
+    expect(extracted.tanah_dan_bangunan.value).toBe(6177000000);
+    expect(extracted.alat_transportasi_dan_mesin.value).toBe(815000000);
+    expect(extracted.harta_bergerak_lainnya.value).toBe(117500000);
+    expect(extracted.surat_berharga.value).toBe(0);
+    expect(extracted.kas_dan_setara_kas.value).toBe(105900000);
+    expect(extracted.harta_lainnya.value).toBe(225188000);
+    expect(extracted.subtotal_harta.value).toBe(7440588000);
+    expect(extracted.hutang.value).toBe(62390867);
+    expect(extracted.total_harta_kekayaan.value).toBe(7378197133);
+  });
+
+  it('reads identity fields and the combined KPK report header', () => {
+    const identity = extractIdentityFromLines([
+      '(Tanggal Penyampaian/Jenis Laporan - Tahun: 18 Februari 2025/Periodik - 2024)',
+      'Status Verifikasi Administratif Lengkap',
+      'BIDANG',
+      ': EKSEKUTIF',
+      'LEMBAGA : KOMISI PEMBERANTASAN KORUPSI (KPK)',
+      'UNIT KERJA',
+      ': PIMPINAN',
+      'I. DATA PRIBADI',
+      '1.',
+      'Nama',
+      ': JOHANIS TANAK',
+      '2. Jabatan : WAKIL KETUA KPK',
+      '3.',
+      'NHK',
+      ': 140163',
+      'II. DATA HARTA'
+    ]);
+
+    expect(identity).toMatchObject({
+      nama: 'JOHANIS TANAK',
+      jabatan: 'WAKIL KETUA KPK',
+      nhk: '140163',
+      bidang: 'EKSEKUTIF',
+      lembaga: 'KOMISI PEMBERANTASAN KORUPSI (KPK)',
+      unit_kerja: 'PIMPINAN',
+      tanggal_penyampaian: '18 Februari 2025',
+      jenis_laporan: 'Periodik',
+      tahun_laporan: '2024',
+      status_verifikasi: 'Administratif Lengkap'
+    });
+  });
 });
 
 describe('Indonesian Money Parsing Utilities', () => {
@@ -35,6 +125,7 @@ describe('Indonesian Money Parsing Utilities', () => {
     expect(parseIndonesianMoney('Rp. 8.645.951.000').value).toBe(8645951000);
     expect(parseIndonesianMoney('Rp 400.000.000').value).toBe(400000000);
     expect(parseIndonesianMoney('Rp. 17.596.646.027').value).toBe(17596646027);
+    expect(parseIndonesianMoney('R p . 6.177.000.000').value).toBe(6177000000);
   });
 
   it('handles zero / dash formats correctly', () => {
@@ -541,6 +632,25 @@ describe('Full Financial Diagnosis Run', () => {
       const data = { identity: { nama: 'Test' } };
       const normalized = normalizeFinancialData(data);
       expect(normalized).toBe(data);
+    });
+
+    it('does not create a subtotal from a failed partial PDF parse', () => {
+      const data = {
+        isParsedSuccess: false,
+        assets: {
+          tanah_dan_bangunan: 5000000000,
+          alat_transportasi_dan_mesin: 0,
+          harta_bergerak_lainnya: 0,
+          surat_berharga: 0,
+          kas_dan_setara_kas: 0,
+          harta_lainnya: 0,
+          subtotal_harta: 0,
+          hutang: 0,
+          total_harta_kekayaan: 0
+        }
+      };
+
+      expect(normalizeFinancialData(data)).toBe(data);
     });
   });
 
