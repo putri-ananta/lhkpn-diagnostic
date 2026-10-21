@@ -1,16 +1,10 @@
 import { useEffect, useState } from 'react';
 
-const THEME_KEY = 'lhkpn-theme';
 const THEMES = ['light', 'dark', 'system'];
+const THEME_LABELS = { light: 'Terang', dark: 'Gelap', system: 'Sistem' };
 
 function getSystemTheme() {
   return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-}
-
-function getEffectiveTheme() {
-  const stored = localStorage.getItem(THEME_KEY);
-  if (stored && THEMES.includes(stored)) return stored;
-  return 'system';
 }
 
 function applyTheme(theme) {
@@ -26,7 +20,7 @@ export function ThemeToggle({ theme, onThemeChange }) {
 
   useEffect(() => {
     applyTheme(theme);
-  }, []);
+  }, [theme]);
 
   useEffect(() => {
     const handler = () => {
@@ -37,7 +31,6 @@ export function ThemeToggle({ theme, onThemeChange }) {
   }, [theme]);
 
   const handleSelect = (t) => {
-    localStorage.setItem(THEME_KEY, t);
     onThemeChange(t);
     setOpen(false);
   };
@@ -56,7 +49,7 @@ export function ThemeToggle({ theme, onThemeChange }) {
         title="Ganti tema tampilan"
         style={{ gap: '0.375rem' }}
       >
-        {iconForTheme(theme)} {theme.charAt(0).toUpperCase() + theme.slice(1)}
+        {iconForTheme(theme)} {THEME_LABELS[theme]}
       </button>
       {open && (
         <>
@@ -86,7 +79,7 @@ export function ThemeToggle({ theme, onThemeChange }) {
                 style={{ width: '100%', justifyContent: 'flex-start', gap: '0.5rem' }}
                 onClick={() => handleSelect(t)}
               >
-                {iconForTheme(t)} {t.charAt(0).toUpperCase() + t.slice(1)}
+                {iconForTheme(t)} {THEME_LABELS[t]}
               </button>
             ))}
           </div>

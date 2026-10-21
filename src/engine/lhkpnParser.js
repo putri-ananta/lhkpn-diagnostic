@@ -305,7 +305,7 @@ function getLabeledField(lines, labelSource) {
   return null;
 }
 
-export function extractIdentityFromLines(allLines, fileName = 'LHKPN.pdf') {
+export function extractIdentityFromLines(allLines) {
   const fullText = allLines.join('\n');
   const flattenedText = fullText.replace(/\s+/g, ' ');
   const headerMatch = flattenedText.match(
@@ -323,18 +323,29 @@ export function extractIdentityFromLines(allLines, fileName = 'LHKPN.pdf') {
   const unitKerja = getLabeledField(allLines, 'UNIT\\s+KERJA');
 
   return {
-    nama: nama || fileName.replace(/\.pdf$/i, '').replace(/_/g, ' '),
-    jabatan: jabatan || 'Penyelenggara Negara',
-    nhk: nhk || '-',
-    bidang: bidang || '-',
-    lembaga: lembaga || 'Instansi Pemerintah',
-    unit_kerja: unitKerja || '-',
-    tanggal_penyampaian: headerMatch?.[1]?.trim() || getLabeledField(allLines, 'TANGGAL\\s+PENYAMPAIAN') || '-',
-    jenis_laporan: headerMatch?.[2]?.trim() || getLabeledField(allLines, 'JENIS\\s+LAPORAN') || '-',
-    tahun_laporan: headerMatch?.[3] || flattenedText.match(/(?:Periodik|Khusus)\s*-\s*((?:19|20)\d{2})\b/i)?.[1] || '-',
+    nama: nama || null,
+    jabatan: jabatan || null,
+    nhk: nhk || null,
+    bidang: bidang || null,
+    lembaga: lembaga || null,
+    unit_kerja: unitKerja || null,
+    tanggal_penyampaian: headerMatch?.[1]?.trim() || getLabeledField(allLines, 'TANGGAL\\s+PENYAMPAIAN') || null,
+    jenis_laporan: headerMatch?.[2]?.trim() || getLabeledField(allLines, 'JENIS\\s+LAPORAN') || null,
+    tahun_laporan: headerMatch?.[3] || flattenedText.match(/(?:Periodik|Khusus)\s*-\s*((?:19|20)\d{2})\b/i)?.[1] || null,
     status_verifikasi: statusMatch
       ? `Administratif ${statusMatch[1].replace(/\s+/g, ' ').trim()}`
-      : 'Tidak terbaca'
+      : null
+  };
+}
+
+/** Determine whether every financial field was actually read; zero is valid. */
+export function assessFinancialCompleteness(assets) {
+  const missingFields = Object.entries(assets || {})
+    .filter(([, value]) => value === null || value === undefined)
+    .map(([field]) => field);
+  return {
+    isSuccess: missingFields.length === 0,
+    missingFields
   };
 }
 
@@ -363,7 +374,7 @@ export async function parseLHKPNPDF(arrayBuffer, fileName = 'LHKPN.pdf') {
     // 1. IDENTITY EXTRACTION
     // -------------------------------------------------------------
     addLog('Mengekstrak data identitas Penyelenggara Negara...');
-    const identity = extractIdentityFromLines(allLines, fileName);
+    const identity = extractIdentityFromLines(allLines);
 
     // -------------------------------------------------------------
     // 2. FINANCIAL ASSET & LIABILITY CATEGORY EXTRACTION
@@ -429,15 +440,15 @@ export async function parseLHKPNPDF(arrayBuffer, fileName = 'LHKPN.pdf') {
     }
 
     const assets = {
-      tanah_dan_bangunan: tanahObj.value !== null ? tanahObj.value : 0,
-      alat_transportasi_dan_mesin: transportObj.value !== null ? transportObj.value : 0,
-      harta_bergerak_lainnya: bergerakObj.value !== null ? bergerakObj.value : 0,
-      surat_berharga: suratBerhargaObj.value !== null ? suratBerhargaObj.value : 0,
-      kas_dan_setara_kas: kasObj.value !== null ? kasObj.value : 0,
-      harta_lainnya: hartaLainnyaObj.value !== null ? hartaLainnyaObj.value : 0,
-      subtotal_harta: subtotalValue !== null && subtotalValue !== undefined ? subtotalValue : 0,
-      hutang: hutangObj.value !== null ? hutangObj.value : 0,
-      total_harta_kekayaan: totalValue !== null && totalValue !== undefined ? totalValue : 0
+      tanah_dan_bangunan: tanahObj.value,
+      alat_transportasi_dan_mesin: transportObj.value,
+      harta_bergerak_lainnya: bergerakObj.value,
+      surat_berharga: suratBerhargaObj.value,
+      kas_dan_setara_kas: kasObj.value,
+      harta_lainnya: hartaLainnyaObj.value,
+      subtotal_harta: subtotalValue,
+      hutang: hutangObj.value,
+      total_harta_kekayaan: totalValue
     };
 
     const categoryDetails = {
@@ -452,9 +463,7 @@ export async function parseLHKPNPDF(arrayBuffer, fileName = 'LHKPN.pdf') {
       total_harta_kekayaan: total
     };
 
-    const missingCategoryCount = 6 - availableCategoryValues.length;
-    const hasCoreTotals = subtotalValue !== null && subtotalValue > 0 && totalValue !== null;
-    const isSuccess = hasCoreTotals && missingCategoryCount === 0;
+    const { isSuccess, missingFields } = assessFinancialCompleteness(assets);
     const statusLabel = isSuccess ? 'Selesai' : 'Perlu Ditinjau';
 
     if (!isSuccess) {
@@ -468,7 +477,7 @@ export async function parseLHKPNPDF(arrayBuffer, fileName = 'LHKPN.pdf') {
       isParsedSuccess: isSuccess,
       status: statusLabel,
       errorReason: !isSuccess
-        ? `${missingCategoryCount} kategori harta tidak terbaca atau nilai total dokumen tidak tersedia.`
+        ? `${missingFields.length} nilai keuangan tidak terbaca (${missingFields.join(', ')}).`
         : undefined,
       identity,
       assets,
@@ -481,25 +490,33 @@ export async function parseLHKPNPDF(arrayBuffer, fileName = 'LHKPN.pdf') {
     return {
       fileName,
       isParsedSuccess: false,
-      status: 'Perlu Ditinjau',
+      status: 'Gagal',
+      fatalError: true,
       errorReason: err.message,
       identity: {
-        nama: fileName.replace(/\.pdf$/i, ''),
-        jabatan: 'Dokumen Perlu Ditinjau',
-        lembaga: 'Format PDF tidak standar / Scanned PDF',
-        tahun_laporan: '-'
+        nama: null,
+        jabatan: null,
+        nhk: null,
+        bidang: null,
+        lembaga: null,
+        unit_kerja: null,
+        tanggal_penyampaian: null,
+        jenis_laporan: null,
+        tahun_laporan: null,
+        status_verifikasi: null
       },
       assets: {
-        tanah_dan_bangunan: 0,
-        alat_transportasi_dan_mesin: 0,
-        harta_bergerak_lainnya: 0,
-        surat_berharga: 0,
-        kas_dan_setara_kas: 0,
-        harta_lainnya: 0,
-        subtotal_harta: 0,
-        hutang: 0,
-        total_harta_kekayaan: 0
+        tanah_dan_bangunan: null,
+        alat_transportasi_dan_mesin: null,
+        harta_bergerak_lainnya: null,
+        surat_berharga: null,
+        kas_dan_setara_kas: null,
+        harta_lainnya: null,
+        subtotal_harta: null,
+        hutang: null,
+        total_harta_kekayaan: null
       },
+      categoryDetails: {},
       logs: parsingLogs,
       parsedAt: new Date().toISOString()
     };

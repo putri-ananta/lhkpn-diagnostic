@@ -45,7 +45,7 @@ export function FinancialMetricCard({ metric }) {
           {/* Metric Value & Status Badge */}
           <div className="keu-metric-val-row">
             <span className="keu-metric-pct">
-              {ratio !== null ? formatPercent(ratio) : 'N/A'}
+              {ratio !== null ? formatPercent(ratio) : 'Tidak tersedia'}
             </span>
             <span className={`keu-badge ${getBadgeClass(statusCategory)}`}>
               {status}

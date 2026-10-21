@@ -1,8 +1,8 @@
 import React from 'react';
-import { FileText, Layers, Sparkles } from 'lucide-react';
+import { FileText, Home, Sparkles } from 'lucide-react';
 import { ThemeToggle } from './ThemeToggle';
 
-export function Header({ activeTab, setActiveTab, onLoadSampleData, theme, onThemeChange }) {
+export function Header({ onHome, showHomeAction = true, onLoadSampleData, showSampleAction = false, theme, onThemeChange }) {
   return (
     <header className="keu-header">
       <div className="keu-header-inner">
@@ -11,38 +11,35 @@ export function Header({ activeTab, setActiveTab, onLoadSampleData, theme, onThe
             <FileText size={20} />
           </div>
           <div>
-            <h1 className="keu-logo-title">LHKPN Financial Diagnosis</h1>
-            <p className="keu-logo-sub">Danarakca Financial Analytics System</p>
+            <h1 className="keu-logo-title">LHKPN Analyzer</h1>
+            <p className="keu-logo-sub">Analisis Finansial Dokumen LHKPN</p>
           </div>
         </div>
 
-        <div className="keu-nav-tabs">
-          <button
-            className={`keu-tab-btn ${activeTab === 'single' ? 'active' : ''}`}
-            onClick={() => setActiveTab('single')}
-          >
-            <FileText size={16} />
-            Satu File
-          </button>
-          <button
-            className={`keu-tab-btn ${activeTab === 'batch' ? 'active' : ''}`}
-            onClick={() => setActiveTab('batch')}
-          >
-            <Layers size={16} />
-            Batch Upload
-          </button>
-        </div>
-
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+          {showHomeAction && (
+            <button
+              type="button"
+              className="keu-btn keu-btn-outline keu-btn-sm"
+              onClick={onHome}
+              title="Kembali ke pilihan analisis"
+            >
+              <Home size={15} />
+              Beranda
+            </button>
+          )}
           <ThemeToggle theme={theme} onThemeChange={onThemeChange} />
-          <button
-            className="keu-btn keu-btn-outline keu-btn-sm"
-            onClick={onLoadSampleData}
-            title="Muat data sampel LHKPN untuk pengujian langsung"
-          >
-            <Sparkles size={14} color="#f59e0b" />
-            Muat Contoh Data
-          </button>
+          {showSampleAction && (
+            <button
+              type="button"
+              className="keu-btn keu-btn-outline keu-btn-sm"
+              onClick={onLoadSampleData}
+              title="Muat data sampel LHKPN untuk pengujian langsung"
+            >
+              <Sparkles size={14} color="#f59e0b" />
+              Muat Contoh
+            </button>
+          )}
         </div>
       </div>
     </header>

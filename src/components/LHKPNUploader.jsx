@@ -1,6 +1,8 @@
 import React, { useState, useRef } from 'react';
 import { UploadCloud, File, Trash2, AlertTriangle, Sparkles, CheckCircle2 } from 'lucide-react';
 
+const MAX_FILE_SIZE = 25 * 1024 * 1024;
+
 export function LHKPNUploader({ isBatchMode, onProcessFiles, onLoadSampleData }) {
   const [isDragOver, setIsDragOver] = useState(false);
   const [selectedFiles, setSelectedFiles] = useState([]);
@@ -23,23 +25,33 @@ export function LHKPNUploader({ isBatchMode, onProcessFiles, onLoadSampleData })
     setErrorMessage('');
     const newPdfFiles = [];
     let invalidCount = 0;
+    let oversizedCount = 0;
 
     Array.from(filesList).forEach((file) => {
-      if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
-        newPdfFiles.push(file);
-      } else {
+      const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
+      if (!isPdf) {
         invalidCount++;
+      } else if (file.size > MAX_FILE_SIZE) {
+        oversizedCount++;
+      } else {
+        newPdfFiles.push(file);
       }
     });
 
-    if (invalidCount > 0) {
-      setErrorMessage(`Sebanyak ${invalidCount} file diabaikan karena bukan format PDF.`);
+    const validationMessages = [];
+    if (invalidCount > 0) validationMessages.push(`${invalidCount} berkas bukan PDF`);
+    if (oversizedCount > 0) validationMessages.push(`${oversizedCount} berkas melebihi 25 MB`);
+    if (validationMessages.length > 0) {
+      setErrorMessage(`Berkas diabaikan: ${validationMessages.join(' dan ')}.`);
     }
 
     if (newPdfFiles.length === 0) return;
 
     if (isBatchMode) {
-      setSelectedFiles((prev) => [...prev, ...newPdfFiles]);
+      setSelectedFiles((prev) => {
+        const known = new Set(prev.map((file) => `${file.name}:${file.size}:${file.lastModified}`));
+        return [...prev, ...newPdfFiles.filter((file) => !known.has(`${file.name}:${file.size}:${file.lastModified}`))];
+      });
     } else {
       setSelectedFiles([newPdfFiles[0]]); // single mode only takes 1 file
     }
@@ -75,15 +87,15 @@ export function LHKPNUploader({ isBatchMode, onProcessFiles, onLoadSampleData })
       <div className="keu-card-header">
         <h2 className="keu-card-title">
           <UploadCloud size={22} color="#60a5fa" />
-          {isBatchMode ? 'Upload Batch Dokumen LHKPN' : 'Upload Dokumen LHKPN'}
+          {isBatchMode ? 'Unggah Beberapa Dokumen LHKPN' : 'Unggah Satu Dokumen LHKPN'}
         </h2>
         <span className="keu-badge keu-badge-info">Format PDF Resmi KPK</span>
       </div>
 
       <p style={{ color: 'var(--keu-text-muted)', fontSize: '0.9rem', marginBottom: '1.25rem' }}>
         {isBatchMode
-          ? 'Unggah beberapa file PDF LHKPN sekaligus untuk membandingkan rasio dan struktur kekayaan secara langsung.'
-          : 'Unggah 1 file PDF LHKPN untuk mengekstraksi data dan menghasilkan laporan Diagnosis Finansial lengkap.'}
+          ? 'Setiap PDF diproses secara mandiri. Dokumen yang berhasil tetap dapat dianalisis meskipun berkas lain gagal.'
+          : 'Dokumen diproses secara lokal di browser dan tidak dikirim ke server aplikasi.'}
       </p>
 
       {/* Drag & Drop Target */}
@@ -119,11 +131,11 @@ export function LHKPNUploader({ isBatchMode, onProcessFiles, onLoadSampleData })
             <UploadCloud size={30} />
           </div>
           <div>
-            <span style={{ fontWeight: 600, color: 'var(--keu-text-main)' }}>Klik untuk memilih file</span>
-            <span style={{ color: 'var(--keu-text-muted)' }}> atau seret file PDF ke area ini</span>
+            <span style={{ fontWeight: 600, color: 'var(--keu-text-main)' }}>Klik untuk memilih berkas</span>
+            <span style={{ color: 'var(--keu-text-muted)' }}> atau seret berkas PDF ke area ini</span>
           </div>
           <span style={{ fontSize: '0.75rem', color: 'var(--keu-text-dim)' }}>
-            Hanya mendukung dokumen .PDF (Maksimal 25MB / file)
+            Hanya mendukung dokumen .PDF (maksimal 25 MB per berkas)
           </span>
         </div>
       </div>
@@ -139,7 +151,7 @@ export function LHKPNUploader({ isBatchMode, onProcessFiles, onLoadSampleData })
       {selectedFiles.length > 0 && (
         <div style={{ marginTop: '1.5rem' }}>
           <h4 style={{ fontSize: '0.875rem', color: 'var(--keu-text-muted)', marginBottom: '0.75rem' }}>
-            File Terpilih ({selectedFiles.length}):
+            Berkas Terpilih ({selectedFiles.length}):
           </h4>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
             {selectedFiles.map((file, idx) => (
@@ -171,7 +183,7 @@ export function LHKPNUploader({ isBatchMode, onProcessFiles, onLoadSampleData })
                     e.stopPropagation();
                     handleRemoveFile(idx);
                   }}
-                  title="Hapus file"
+                  title="Hapus berkas"
                 >
                   <Trash2 size={14} />
                 </button>
@@ -193,7 +205,7 @@ export function LHKPNUploader({ isBatchMode, onProcessFiles, onLoadSampleData })
               onClick={handleSubmit}
             >
               <CheckCircle2 size={16} />
-              Mulai Diagnosis ({selectedFiles.length} File)
+              Proses {selectedFiles.length} Berkas
             </button>
           </div>
         </div>
@@ -216,7 +228,7 @@ export function LHKPNUploader({ isBatchMode, onProcessFiles, onLoadSampleData })
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
           <Sparkles size={20} color="#f59e0b" />
           <div style={{ fontSize: '0.8125rem' }}>
-            <span style={{ fontWeight: 600, color: '#fbbf24' }}>Ingin langsung mencoba tanpa file PDF?</span>
+            <span style={{ fontWeight: 600, color: '#fbbf24' }}>Ingin langsung mencoba tanpa berkas PDF?</span>
             <p style={{ color: 'var(--keu-text-muted)' }}>Muat contoh data simulasi LHKPN KPK asli untuk pengujian.</p>
           </div>
         </div>

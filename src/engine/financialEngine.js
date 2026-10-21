@@ -4,7 +4,7 @@
  * data integrity checks, and personal finance simulations.
  */
 
-import { parseIndonesianMoney, formatCurrency, formatPercent } from '../utils/formatting';
+import { formatPercent } from '../utils/formatting';
 
 /**
  * @typedef {Object} LHKPNAssets
@@ -68,7 +68,7 @@ export function calculateDAR(hutang, subtotalHarta) {
   } else if (pct < 5) {
     status = 'Sehat / Aman';
     statusCategory = 'success';
-    shortDiagnosis = 'Porsi utang tergolong sangat kecil (< 5%) terhadap total aset declared.';
+    shortDiagnosis = 'Porsi utang tergolong sangat kecil (< 5%) terhadap total aset yang dilaporkan.';
     progressPct = (pct / 5) * 30;
   } else if (pct <= 50) {
     status = 'Berisiko Tinggi';
@@ -123,7 +123,7 @@ export function calculateCAR(kas, subtotalHarta) {
   let progressPct = 50;
 
   if (pct < 2) {
-    status = 'Sangat Kasur / Asset-Rich, Cash-Poor';
+    status = 'Sangat Tidak Likuid';
     statusCategory = 'warning';
     shortDiagnosis = 'Likuiditas sangat rendah (< 2%). Kekayaan terkunci pada aset tidak likuid.';
     progressPct = (pct / 2) * 20;
@@ -229,8 +229,8 @@ export function calculatePropertyConcentration(tanahBangunan, subtotalHarta) {
  * Formula: (alat_transportasi_dan_mesin + harta_bergerak_lainnya) / subtotal_harta
  */
 export function calculateDepreciatingAssetRatio(transportasi, bergerakLainnya, subtotalHarta) {
-  const depSum = (transportasi || 0) + (bergerakLainnya || 0);
-  if (!subtotalHarta || subtotalHarta <= 0) {
+  const hasCompleteCategories = Number.isFinite(transportasi) && Number.isFinite(bergerakLainnya);
+  if (!subtotalHarta || subtotalHarta <= 0 || !hasCompleteCategories) {
     return {
       key: 'depreciating',
       name: 'Rasio Aset Depresiasi',
@@ -238,12 +238,13 @@ export function calculateDepreciatingAssetRatio(transportasi, bergerakLainnya, s
       status: 'Data Tidak Lengkap',
       statusCategory: 'neutral',
       idealRange: '< 15%',
-      shortDiagnosis: 'Data aset depresiasi tidak dapat dihitung.',
+      shortDiagnosis: 'Data transportasi dan harta bergerak harus terbaca lengkap untuk menghitung rasio ini.',
       formula: '(Transportasi + Harta Bergerak) / Subtotal Harta',
       progressPct: 0
     };
   }
 
+  const depSum = transportasi + bergerakLainnya;
   const ratio = depSum / subtotalHarta;
   const pct = ratio * 100;
 
@@ -287,7 +288,7 @@ export function calculateDepreciatingAssetRatio(transportasi, bergerakLainnya, s
  * Formula: surat_berharga / subtotal_harta
  */
 export function calculateProductiveAssetRatio(suratBerharga, subtotalHarta) {
-  if (!subtotalHarta || subtotalHarta <= 0) {
+  if (!subtotalHarta || subtotalHarta <= 0 || !Number.isFinite(suratBerharga)) {
     return {
       key: 'productive',
       name: 'Rasio Aset Produktif',
@@ -295,13 +296,13 @@ export function calculateProductiveAssetRatio(suratBerharga, subtotalHarta) {
       status: 'Data Tidak Lengkap',
       statusCategory: 'neutral',
       idealRange: '20% – 50%',
-      shortDiagnosis: 'Data surat berharga tidak dapat dihitung.',
+      shortDiagnosis: 'Data surat berharga belum tersedia sehingga rasio tidak dapat dihitung.',
       formula: 'Surat Berharga / Subtotal Harta',
       progressPct: 0
     };
   }
 
-  const sbVal = suratBerharga || 0;
+  const sbVal = suratBerharga;
   const ratio = sbVal / subtotalHarta;
   const pct = ratio * 100;
 
@@ -366,7 +367,7 @@ export function resolveSubtotalFromCategories(assets) {
     surat_berharga,
     kas_dan_setara_kas,
     harta_lainnya
-  ].filter((v) => v !== null && v !== undefined && v > 0);
+  ];
 
   // If subtotal already exists and is positive, return as-is
   const existingSubtotal = assets.subtotal_harta;
@@ -374,8 +375,10 @@ export function resolveSubtotalFromCategories(assets) {
     return { subtotal: existingSubtotal, wasComputed: false };
   }
 
-  // Compute from available category values
-  if (categoryValues.length > 0) {
+  // Only derive a subtotal when all six categories are known. Missing values
+  // must never be silently interpreted as confirmed zeroes.
+  if (categoryValues.every((value) => typeof value === 'number' && Number.isFinite(value))
+    && categoryValues.some((value) => value > 0)) {
     const computed = categoryValues.reduce((a, b) => a + b, 0);
     return { subtotal: computed, wasComputed: true };
   }
@@ -389,6 +392,14 @@ export function resolveSubtotalFromCategories(assets) {
  */
 export function normalizeFinancialData(extractedData) {
   if (!extractedData || !extractedData.assets) {
+    return extractedData;
+  }
+
+  // Unified records already contain the validated effective snapshot. Its
+  // provenance is authoritative: re-deriving here would make diagnosis differ
+  // from detail, simulation, timeseries, and batch views—especially after a
+  // user intentionally clears a value.
+  if (extractedData.provenance && typeof extractedData.provenance === 'object') {
     return extractedData;
   }
 
@@ -440,6 +451,21 @@ export function checkDataIntegrity(assets) {
     hutang,
     total_harta_kekayaan
   } = assets;
+  const categoryValues = [
+    tanah_dan_bangunan,
+    alat_transportasi_dan_mesin,
+    harta_bergerak_lainnya,
+    surat_berharga,
+    kas_dan_setara_kas,
+    harta_lainnya
+  ];
+  const missingCategoryCount = categoryValues.filter(
+    (value) => typeof value !== 'number' || !Number.isFinite(value)
+  ).length;
+
+  if (missingCategoryCount > 0) {
+    warnings.push(`${missingCategoryCount} kategori aset belum tersedia dan tidak dianggap sebagai nol.`);
+  }
 
   // If subtotal is missing or zero, try to compute from categories
   let effectiveSubtotal = subtotal_harta;
@@ -454,30 +480,30 @@ export function checkDataIntegrity(assets) {
     }
   }
 
-  const sumCategories =
-    (tanah_dan_bangunan || 0) +
-    (alat_transportasi_dan_mesin || 0) +
-    (harta_bergerak_lainnya || 0) +
-    (surat_berharga || 0) +
-    (kas_dan_setara_kas || 0) +
-    (harta_lainnya || 0);
+  const sumCategories = categoryValues
+    .filter((value) => typeof value === 'number' && Number.isFinite(value))
+    .reduce((sum, value) => sum + value, 0);
 
   // Allow small rounding tolerance (e.g. 1000 Rp)
   const categoryDiff = Math.abs(sumCategories - effectiveSubtotal);
-  if (categoryDiff > 1000) {
+  if (missingCategoryCount === 0 && categoryDiff > 1000) {
     warnings.push(
       `Jumlah 6 kategori harta (Rp ${sumCategories.toLocaleString('id-ID')}) memiliki selisih dengan Subtotal Harta (Rp ${effectiveSubtotal.toLocaleString('id-ID')}). Nilai hasil ekstraksi perlu ditinjau.`
     );
   }
 
-  if (total_harta_kekayaan !== null && total_harta_kekayaan !== undefined) {
-    const expectedTotal = effectiveSubtotal - (hutang || 0);
+  if (hutang === null || hutang === undefined || !Number.isFinite(hutang)) {
+    warnings.push('Total utang belum tersedia dan tidak dianggap sebagai nol.');
+  } else if (total_harta_kekayaan !== null && total_harta_kekayaan !== undefined) {
+    const expectedTotal = effectiveSubtotal - hutang;
     const totalDiff = Math.abs(expectedTotal - total_harta_kekayaan);
     if (totalDiff > 1000) {
       warnings.push(
         `Total Harta Kekayaan (Rp ${total_harta_kekayaan.toLocaleString('id-ID')}) tidak persis sama dengan Subtotal - Hutang (Rp ${expectedTotal.toLocaleString('id-ID')}). Nilai hasil ekstraksi perlu ditinjau.`
       );
     }
+  } else {
+    warnings.push('Kekayaan bersih belum tersedia.');
   }
 
   return {
@@ -494,10 +520,8 @@ export function deriveOverallStatus(metrics, integrity) {
     return 'Perlu Ditinjau';
   }
 
-  const dar = metrics.find(m => m.key === 'dar');
   const car = metrics.find(m => m.key === 'car');
   const prop = metrics.find(m => m.key === 'property');
-  const dep = metrics.find(m => m.key === 'depreciating');
   const prod = metrics.find(m => m.key === 'productive');
 
   const dangerCount = metrics.filter(m => m.statusCategory === 'danger').length;
@@ -538,11 +562,10 @@ export function deriveOverallStatus(metrics, integrity) {
 /**
  * Generates rule-based deterministic summary narrative
  */
-export function generateNarrativeSummary(metrics, assets) {
+export function generateNarrativeSummary(metrics, _assets) {
   const dar = metrics.find(m => m.key === 'dar');
   const car = metrics.find(m => m.key === 'car');
   const prop = metrics.find(m => m.key === 'property');
-  const dep = metrics.find(m => m.key === 'depreciating');
   const prod = metrics.find(m => m.key === 'productive');
 
   const sentences = [];
@@ -601,8 +624,6 @@ export function calculatePersonalFinanceSimulation(monthlyIncome, monthlyExpendi
   let maxEssentialSpending = null;
 
   if (hasIncome) {
-    // FIRE target = monthly_income * 300 (4% rule / 25x annual)
-    fireTarget = monthlyIncome * 300;
     // Minimum monthly investment = monthly_income * 15%
     minMonthlyInvestment = monthlyIncome * 0.15;
     // Maximum essential spending = monthly_income * 65%
@@ -610,6 +631,8 @@ export function calculatePersonalFinanceSimulation(monthlyIncome, monthlyExpendi
   }
 
   if (hasExpenditure) {
+    // FIRE number = annual expenses / 4% SWR.
+    fireTarget = (monthlyExpenditure * 12) / 0.04;
     // Emergency fund target = monthly_expenditure * 3
     emergencyFundTarget = monthlyExpenditure * 3;
   }
@@ -626,7 +649,7 @@ export function calculatePersonalFinanceSimulation(monthlyIncome, monthlyExpendi
 /**
  * Generates portfolio profile label and description
  */
-export function generatePortfolioProfile(metrics, assets) {
+export function generatePortfolioProfile(metrics, _assets) {
   const dar = metrics.find(m => m.key === 'dar');
   const car = metrics.find(m => m.key === 'car');
   const prop = metrics.find(m => m.key === 'property');
@@ -678,12 +701,11 @@ export function generatePortfolioProfile(metrics, assets) {
 /**
  * Generates actionable key findings
  */
-export function generateKeyFindings(metrics, assets, integrity) {
+export function generateKeyFindings(metrics, _assets, integrity) {
   const findings = [];
   const dar = metrics.find(m => m.key === 'dar');
   const car = metrics.find(m => m.key === 'car');
   const prop = metrics.find(m => m.key === 'property');
-  const dep = metrics.find(m => m.key === 'depreciating');
   const prod = metrics.find(m => m.key === 'productive');
 
   if (dar && dar.ratio === 0) {
@@ -726,7 +748,7 @@ export function generateKeyFindings(metrics, assets, integrity) {
 /**
  * Generates deterministic diagnostic summary with actionable insights
  */
-export function computeDiagnosticSummary(metrics, assets, integrity) {
+export function computeDiagnosticSummary(metrics, _assets, integrity) {
   const dar = metrics.find(m => m.key === 'dar');
   const car = metrics.find(m => m.key === 'car');
   const prop = metrics.find(m => m.key === 'property');

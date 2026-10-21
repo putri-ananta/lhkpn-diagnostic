@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Calculator, ShieldAlert, CheckCircle } from 'lucide-react';
+import { Calculator, ShieldAlert } from 'lucide-react';
 import { formatCurrency } from '../utils/formatting';
 import { calculatePersonalFinanceSimulation } from '../engine/financialEngine';
 
@@ -22,7 +22,7 @@ export function PersonalFinanceSimulation() {
       <div className="keu-card-header">
         <h3 className="keu-card-title">
           <Calculator size={20} color="#60a5fa" />
-          Simulasi Keuangan Pribadi (Optional)
+          Simulasi Keuangan Pribadi (Opsional)
         </h3>
         <span className="keu-badge keu-badge-info">Perencanaan Finansial</span>
       </div>
@@ -82,10 +82,10 @@ export function PersonalFinanceSimulation() {
               TARGET KEBEBASAN FINANSIAL (FIRE Target - 4% Rule)
             </span>
             <div style={{ fontSize: '1.25rem', fontWeight: 700, color: '#34d399', marginTop: '0.25rem' }}>
-              {simulation.fireTarget ? formatCurrency(simulation.fireTarget) : 'Memerlukan input pendapatan'}
+              {simulation.fireTarget ? formatCurrency(simulation.fireTarget) : 'Memerlukan input pengeluaran'}
             </div>
             <p style={{ fontSize: '0.75rem', color: 'var(--keu-text-dim)', marginTop: '0.25rem' }}>
-              Format 300 × pendapatan bulanan (25× pendapatan tahunan).
+              Pengeluaran tahunan dibagi 4% (estimasi sederhana, bukan jaminan hasil).
             </p>
           </div>
 

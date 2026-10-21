@@ -1,4 +1,8 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+
+vi.mock('pdfjs-dist/build/pdf.worker.min.mjs?url', () => ({
+  default: new URL('../../node_modules/pdfjs-dist/build/pdf.worker.min.mjs', import.meta.url).href
+}));
 import {
   calculateDAR,
   calculateCAR,
@@ -16,10 +20,44 @@ import {
 } from './financialEngine';
 import { parseIndonesianMoney, formatCurrency, formatPercent } from '../utils/formatting';
 import {
+  assessFinancialCompleteness,
   extractCategoryValuesFromLines,
   extractIdentityFromLines,
-  groupTextItemsIntoLines
+  groupTextItemsIntoLines,
+  parseLHKPNPDF
 } from './lhkpnParser';
+
+function buildMinimalTextPdf(lines) {
+  const escapePdfText = (value) => value.replace(/([\\()])/g, '\\$1');
+  const content = [
+    'BT',
+    '/F1 10 Tf',
+    ...lines.map((line, index) => `1 0 0 1 50 ${800 - index * 18} Tm (${escapePdfText(line)}) Tj`),
+    'ET'
+  ].join('\n');
+  const objects = [
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 842] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>',
+    `<< /Length ${content.length} >>\nstream\n${content}\nendstream`,
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>'
+  ];
+
+  let pdf = '%PDF-1.4\n';
+  const offsets = [0];
+  objects.forEach((object, index) => {
+    offsets.push(pdf.length);
+    pdf += `${index + 1} 0 obj\n${object}\nendobj\n`;
+  });
+  const xrefOffset = pdf.length;
+  pdf += `xref\n0 ${objects.length + 1}\n`;
+  pdf += '0000000000 65535 f \n';
+  offsets.slice(1).forEach((offset) => {
+    pdf += `${String(offset).padStart(10, '0')} 00000 n \n`;
+  });
+  pdf += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`;
+  return new TextEncoder().encode(pdf).buffer;
+}
 
 describe('PDF text layout parsing', () => {
   it('orders text by reading position instead of PDF item order', () => {
@@ -118,6 +156,90 @@ describe('PDF text layout parsing', () => {
       status_verifikasi: 'Administratif Lengkap'
     });
   });
+
+  it('does not invent identity fields from a file name or generic placeholders', () => {
+    const identity = extractIdentityFromLines(['Dokumen tanpa bagian identitas'], 'Nama_Dari_File.pdf');
+
+    expect(identity).toEqual({
+      nama: null,
+      jabatan: null,
+      nhk: null,
+      bidang: null,
+      lembaga: null,
+      unit_kerja: null,
+      tanggal_penyampaian: null,
+      jenis_laporan: null,
+      tahun_laporan: null,
+      status_verifikasi: null
+    });
+  });
+
+  it('marks a corrupt PDF as a fatal failure without fabricated zeroes or identity', async () => {
+    const invalidPdf = new TextEncoder().encode('bukan dokumen pdf').buffer;
+    const result = await parseLHKPNPDF(invalidPdf, 'Nama_Dari_File.pdf');
+
+    expect(result.status).toBe('Gagal');
+    expect(result.fatalError).toBe(true);
+    expect(result.identity.nama).toBeNull();
+    expect(Object.values(result.assets).every((value) => value === null)).toBe(true);
+  });
+
+  it('parses a complete supported PDF through the real PDF.js path', async () => {
+    const pdf = buildMinimalTextPdf([
+      'I. DATA PRIBADI',
+      'Nama : BUDI SANTOSO',
+      'Jabatan : DIREKTUR',
+      'NHK : 12345',
+      'LEMBAGA : KEMENTERIAN CONTOH',
+      'UNIT KERJA : UNIT UTAMA',
+      'Tanggal Penyampaian/Jenis Laporan - Tahun: 18 Februari 2025/Periodik - 2024',
+      'II. DATA HARTA',
+      'A. TANAH DAN BANGUNAN Rp. 100.000.000',
+      'B. ALAT TRANSPORTASI DAN MESIN Rp. 20.000.000',
+      'C. HARTA BERGERAK LAINNYA Rp. 10.000.000',
+      'D. SURAT BERHARGA Rp. 30.000.000',
+      'E. KAS DAN SETARA KAS Rp. 40.000.000',
+      'F. HARTA LAINNYA Rp. ----',
+      'SUB TOTAL HARTA Rp. 200.000.000',
+      'III. HUTANG Rp. 50.000.000',
+      'IV. TOTAL HARTA KEKAYAAN Rp. 150.000.000'
+    ]);
+
+    const result = await parseLHKPNPDF(pdf, 'dokumen.pdf');
+
+    expect(result.status, result.errorReason).toBe('Selesai');
+    expect(result.isParsedSuccess).toBe(true);
+    expect(result.identity).toMatchObject({ nama: 'BUDI SANTOSO', nhk: '12345', tahun_laporan: '2024' });
+    expect(result.assets).toMatchObject({
+      tanah_dan_bangunan: 100_000_000,
+      surat_berharga: 30_000_000,
+      kas_dan_setara_kas: 40_000_000,
+      harta_lainnya: 0,
+      subtotal_harta: 200_000_000,
+      hutang: 50_000_000,
+      total_harta_kekayaan: 150_000_000
+    });
+  });
+
+  it('accepts confirmed all-zero values but flags a missing debt field', () => {
+    const allZero = {
+      tanah_dan_bangunan: 0,
+      alat_transportasi_dan_mesin: 0,
+      harta_bergerak_lainnya: 0,
+      surat_berharga: 0,
+      kas_dan_setara_kas: 0,
+      harta_lainnya: 0,
+      subtotal_harta: 0,
+      hutang: 0,
+      total_harta_kekayaan: 0
+    };
+
+    expect(assessFinancialCompleteness(allZero)).toEqual({ isSuccess: true, missingFields: [] });
+    expect(assessFinancialCompleteness({ ...allZero, hutang: null })).toEqual({
+      isSuccess: false,
+      missingFields: ['hutang']
+    });
+  });
 });
 
 describe('Indonesian Money Parsing Utilities', () => {
@@ -192,11 +314,28 @@ describe('Financial Engine Ratios', () => {
     expect(res.status).toBe('Ideal');
   });
 
+  it('does not convert an unread depreciating-asset category into zero', () => {
+    const missingTransport = calculateDepreciatingAssetRatio(null, 100_000_000, 1_000_000_000);
+    const missingMovables = calculateDepreciatingAssetRatio(100_000_000, null, 1_000_000_000);
+
+    expect(missingTransport.ratio).toBeNull();
+    expect(missingTransport.status).toBe('Data Tidak Lengkap');
+    expect(missingMovables.ratio).toBeNull();
+    expect(missingMovables.status).toBe('Data Tidak Lengkap');
+  });
+
   it('calculates Productive Asset Ratio correctly', () => {
     const suratBerharga = 0;
     const res = calculateProductiveAssetRatio(suratBerharga, sampleSubtotal);
     expect(res.ratio).toBe(0);
     expect(res.status).toBe('Rendah / Tidak Ada Investasi');
+  });
+
+  it('does not convert unread securities into a confirmed zero allocation', () => {
+    const result = calculateProductiveAssetRatio(null, 1_000_000_000);
+
+    expect(result.ratio).toBeNull();
+    expect(result.status).toBe('Data Tidak Lengkap');
   });
 
   it('handles missing or zero subtotal without dividing by zero', () => {
@@ -214,7 +353,7 @@ describe('Personal Finance Simulation', () => {
   it('calculates targets when income and expenditure are provided', () => {
     const sim = calculatePersonalFinanceSimulation(20000000, 10000000);
     expect(sim.hasInputs).toBe(true);
-    expect(sim.fireTarget).toBe(20000000 * 300); // 6 billion
+    expect(sim.fireTarget).toBe((10000000 * 12) / 0.04); // 3 billion, expense-based
     expect(sim.minMonthlyInvestment).toBe(20000000 * 0.15); // 3 million
     expect(sim.maxEssentialSpending).toBe(20000000 * 0.65); // 13 million
     expect(sim.emergencyFundTarget).toBe(10000000 * 3); // 30 million
@@ -280,6 +419,7 @@ describe('Full Financial Diagnosis Run', () => {
 
     const integrity = checkDataIntegrity(titoAssets);
     const overallStatus = deriveOverallStatus(metrics, integrity);
+    expect(overallStatus).toBe('Likuiditas Seimbang');
 
     // Verify key metrics
     expect(metrics[0].ratio).toBe(0); // No debt
@@ -587,6 +727,20 @@ describe('Full Financial Diagnosis Run', () => {
       expect(result.subtotal).toBeNull();
       expect(result.wasComputed).toBe(false);
     });
+
+    it('does not derive a subtotal from incomplete categories', () => {
+      const result = resolveSubtotalFromCategories({
+        tanah_dan_bangunan: 5000000000,
+        alat_transportasi_dan_mesin: null,
+        harta_bergerak_lainnya: 300000000,
+        surat_berharga: 0,
+        kas_dan_setara_kas: 2000000000,
+        harta_lainnya: 0,
+        subtotal_harta: null
+      });
+
+      expect(result).toEqual({ subtotal: null, wasComputed: false });
+    });
   });
 
   describe('normalizeFinancialData', () => {
@@ -651,6 +805,36 @@ describe('Full Financial Diagnosis Run', () => {
       };
 
       expect(normalizeFinancialData(data)).toBe(data);
+    });
+
+    it('does not re-derive values intentionally cleared in the unified effective model', () => {
+      const effective = {
+        isParsedSuccess: true,
+        identity: { nama: 'Contoh' },
+        assets: {
+          tanah_dan_bangunan: 500_000_000,
+          alat_transportasi_dan_mesin: 100_000_000,
+          harta_bergerak_lainnya: 50_000_000,
+          surat_berharga: 100_000_000,
+          kas_dan_setara_kas: 250_000_000,
+          harta_lainnya: 0,
+          subtotal_harta: null,
+          hutang: 0,
+          total_harta_kekayaan: null
+        },
+        provenance: {
+          'assets.subtotal_harta': 'manual',
+          'assets.total_harta_kekayaan': 'manual'
+        }
+      };
+
+      const normalized = normalizeFinancialData(effective);
+      const diagnosis = runFinancialDiagnosis(effective);
+
+      expect(normalized).toBe(effective);
+      expect(diagnosis.assets.subtotal_harta).toBeNull();
+      expect(diagnosis.assets.total_harta_kekayaan).toBeNull();
+      expect(diagnosis.metrics.every((metric) => metric.ratio === null)).toBe(true);
     });
   });
 

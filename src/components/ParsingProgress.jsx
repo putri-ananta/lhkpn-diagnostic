@@ -1,94 +1,54 @@
-import React, { useEffect, useState } from 'react';
-import { Loader2, CheckCircle2, FileSearch, Calculator, PieChart } from 'lucide-react';
+import React from 'react';
+import { AlertCircle, AlertTriangle, CheckCircle2, FileSearch, Loader2 } from 'lucide-react';
 
-const STEPS = [
-  { id: 1, label: 'Membaca dokumen PDF', icon: FileSearch },
-  { id: 2, label: 'Mengekstrak data identitas & kategori LHKPN', icon: Loader2 },
-  { id: 3, label: 'Menghitung 5 rasio finansial utama', icon: Calculator },
-  { id: 4, label: 'Menyiapkan laporan Diagnosis Finansial', icon: PieChart }
-];
-
-export function ParsingProgress({ totalFiles = 1, currentFileName = 'LHKPN.pdf', onComplete }) {
-  const [activeStep, setActiveStep] = useState(1);
-
-  useEffect(() => {
-    const timer1 = setTimeout(() => setActiveStep(2), 600);
-    const timer2 = setTimeout(() => setActiveStep(3), 1200);
-    const timer3 = setTimeout(() => setActiveStep(4), 1800);
-    const timer4 = setTimeout(() => {
-      if (onComplete) onComplete();
-    }, 2400);
-
-    return () => {
-      clearTimeout(timer1);
-      clearTimeout(timer2);
-      clearTimeout(timer3);
-      clearTimeout(timer4);
-    };
-  }, [onComplete]);
+export function ParsingProgress({
+  currentFileName = 'LHKPN.pdf',
+  completedFiles = 0,
+  totalFiles = 1,
+  fileStatuses = []
+}) {
+  const safeTotal = Math.max(1, totalFiles);
+  const progress = Math.min(100, Math.round((completedFiles / safeTotal) * 100));
 
   return (
-    <div className="keu-card" style={{ maxWidth: '640px', margin: '3rem auto', textAlign: 'center' }}>
-      <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '1.5rem' }}>
-        <div
-          style={{
-            width: '64px',
-            height: '64px',
-            borderRadius: '50%',
-            backgroundColor: 'rgba(37, 99, 235, 0.15)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            color: '#3b82f6'
-          }}
-        >
-          <Loader2 size={32} className="animate-spin" />
+    <div className="keu-card" style={{ maxWidth: '720px', margin: '3rem auto' }} aria-live="polite">
+      <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '1.5rem' }}>
+        <div style={{ width: 52, height: 52, borderRadius: '50%', background: 'rgba(37, 99, 235, 0.15)', display: 'grid', placeItems: 'center', color: '#60a5fa', flexShrink: 0 }}>
+          <Loader2 size={27} className="animate-spin" />
+        </div>
+        <div>
+          <h2 style={{ fontSize: '1.15rem', fontWeight: 750 }}>Memproses Dokumen LHKPN</h2>
+          <p style={{ color: 'var(--keu-text-muted)', fontSize: '0.85rem', marginTop: '0.25rem' }}>
+            Sedang membaca: <strong style={{ color: 'var(--keu-text-main)' }}>{currentFileName}</strong>
+          </p>
         </div>
       </div>
 
-      <h3 style={{ fontSize: '1.25rem', fontWeight: 700, marginBottom: '0.5rem' }}>
-        Memproses Pemindaian Dokumen LHKPN
-      </h3>
-      <p style={{ color: 'var(--keu-text-muted)', fontSize: '0.875rem', marginBottom: '2rem' }}>
-        Dokumen: <span style={{ color: 'var(--keu-text-main)', fontWeight: 600 }}>{currentFileName}</span>
-      </p>
+      <div style={{ height: 9, borderRadius: 999, overflow: 'hidden', background: 'var(--keu-bg-primary)' }}>
+        <div style={{ height: '100%', width: `${Math.max(5, progress)}%`, background: 'linear-gradient(90deg, #2563eb, #0d9488)', transition: 'width 180ms ease' }} />
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '0.45rem', fontSize: '0.78rem', color: 'var(--keu-text-muted)' }}>
+        <span>{completedFiles} dari {totalFiles} berkas selesai</span>
+        <span>{progress}%</span>
+      </div>
 
-      {/* Step Indicators */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.875rem', textAlign: 'left' }}>
-        {STEPS.map((step) => {
-          const isDone = activeStep > step.id;
-          const isCurrent = activeStep === step.id;
-          const Icon = step.icon;
-
-          return (
-            <div
-              key={step.id}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '1rem',
-                padding: '0.75rem 1rem',
-                borderRadius: 'var(--keu-radius-md)',
-                backgroundColor: isCurrent ? 'rgba(37, 99, 235, 0.1)' : 'transparent',
-                border: isCurrent ? '1px solid rgba(59, 130, 246, 0.3)' : '1px solid transparent',
-                opacity: isDone || isCurrent ? 1 : 0.4,
-                transition: 'all 0.3s ease'
-              }}
-            >
-              {isDone ? (
-                <CheckCircle2 size={20} color="#34d399" />
-              ) : isCurrent ? (
-                <Loader2 size={20} color="#60a5fa" className="animate-spin" />
-              ) : (
-                <Icon size={20} color="var(--keu-text-muted)" />
-              )}
-              <span style={{ fontSize: '0.875rem', fontWeight: isCurrent ? 600 : 400 }}>
-                {step.label}
+      {fileStatuses.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.55rem', marginTop: '1.4rem' }}>
+          {fileStatuses.map((item) => (
+            <div key={item.id || item.name} style={{ display: 'flex', alignItems: 'center', gap: '0.7rem', padding: '0.65rem 0.8rem', background: 'var(--keu-bg-primary)', borderRadius: 'var(--keu-radius-md)', border: '1px solid var(--keu-border-subtle)' }}>
+              {item.status === 'success' ? <CheckCircle2 size={17} color="#34d399" />
+                : item.status === 'failed' ? <AlertTriangle size={17} color="#f87171" />
+                  : item.status === 'warning' ? <AlertCircle size={17} color="#fbbf24" />
+                  : item.status === 'processing' ? <Loader2 size={17} color="#60a5fa" className="animate-spin" />
+                    : <FileSearch size={17} color="var(--keu-text-muted)" />}
+              <span style={{ flex: 1, fontSize: '0.82rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.name}</span>
+              <span className={`keu-badge ${item.status === 'success' ? 'keu-badge-success' : item.status === 'failed' ? 'keu-badge-danger' : item.status === 'warning' ? 'keu-badge-warning' : 'keu-badge-info'}`}>
+                {item.status === 'success' ? 'Selesai' : item.status === 'failed' ? 'Gagal' : item.status === 'warning' ? 'Perlu ditinjau' : item.status === 'processing' ? 'Diproses' : 'Menunggu'}
               </span>
             </div>
-          );
-        })}
-      </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
