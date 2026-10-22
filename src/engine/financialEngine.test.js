@@ -21,6 +21,7 @@ import {
 import { parseIndonesianMoney, formatCurrency, formatPercent } from '../utils/formatting';
 import {
   assessFinancialCompleteness,
+  assessFinancialConsistency,
   extractCategoryValuesFromLines,
   extractIdentityFromLines,
   groupTextItemsIntoLines,
@@ -123,6 +124,49 @@ describe('PDF text layout parsing', () => {
     expect(extracted.total_harta_kekayaan.value).toBe(7378197133);
   });
 
+  it('prefers an explicit category total over monetary values inside detail rows', () => {
+    const extracted = extractCategoryValuesFromLines([
+      'A. TANAH DAN BANGUNAN',
+      '1. Tanah Seluas 224 m2, HASIL SENDIRI Rp. 750.000.000',
+      '2. Tanah Seluas 300 m2, WARISAN Rp. 1.250.000.000',
+      'JUMLAH TANAH DAN BANGUNAN Rp. 2.000.000.000',
+      'B. ALAT TRANSPORTASI DAN MESIN Rp. 100.000.000'
+    ]);
+
+    expect(extracted.tanah_dan_bangunan.value).toBe(2_000_000_000);
+    expect(extracted.tanah_dan_bangunan.strategy).toBe('explicit-total');
+    expect(extracted.tanah_dan_bangunan.extractedLine).toContain('JUMLAH');
+  });
+
+  it('reads an amount even when PDF glyph extraction inserts spaces between every digit', () => {
+    const extracted = extractCategoryValuesFromLines([
+      'A. TANAH DAN BANGUNAN',
+      'R p .',
+      '6 . 1 7 7 . O O O . O O O',
+      'B. ALAT TRANSPORTASI DAN MESIN Rp. 100.000.000'
+    ]);
+
+    expect(extracted.tanah_dan_bangunan.value).toBe(6_177_000_000);
+    expect(extracted.tanah_dan_bangunan.confidence).toBe('high');
+  });
+
+  it('uses arithmetic reconciliation when one heading contains multiple plausible values', () => {
+    const extracted = extractCategoryValuesFromLines([
+      'A. TANAH DAN BANGUNAN Rp. 100.000.000 Rp. 900.000.000',
+      'B. ALAT TRANSPORTASI DAN MESIN Rp. 50.000.000',
+      'C. HARTA BERGERAK LAINNYA Rp. 25.000.000',
+      'D. SURAT BERHARGA Rp. 25.000.000',
+      'E. KAS DAN SETARA KAS Rp. 25.000.000',
+      'F. HARTA LAINNYA Rp. 25.000.000',
+      'SUB TOTAL HARTA Rp. 1.050.000.000',
+      'III. HUTANG Rp. 50.000.000',
+      'IV. TOTAL HARTA KEKAYAAN Rp. 1.000.000.000'
+    ]);
+
+    expect(extracted.tanah_dan_bangunan.value).toBe(900_000_000);
+    expect(extracted.tanah_dan_bangunan.reconciledBy).toBe('subtotal');
+  });
+
   it('reads identity fields and the combined KPK report header', () => {
     const identity = extractIdentityFromLines([
       '(Tanggal Penyampaian/Jenis Laporan - Tahun: 18 Februari 2025/Periodik - 2024)',
@@ -221,6 +265,28 @@ describe('PDF text layout parsing', () => {
     });
   });
 
+  it('does not mark a numerically inconsistent PDF as successfully parsed', async () => {
+    const pdf = buildMinimalTextPdf([
+      'II. DATA HARTA',
+      'A. TANAH DAN BANGUNAN Rp. 100.000.000',
+      'B. ALAT TRANSPORTASI DAN MESIN Rp. 20.000.000',
+      'C. HARTA BERGERAK LAINNYA Rp. 10.000.000',
+      'D. SURAT BERHARGA Rp. ----',
+      'E. KAS DAN SETARA KAS Rp. 20.000.000',
+      'F. HARTA LAINNYA Rp. ----',
+      'SUB TOTAL HARTA Rp. 160.000.000',
+      'III. HUTANG Rp. 30.000.000',
+      'IV. TOTAL HARTA KEKAYAAN Rp. 130.000.000'
+    ]);
+
+    const result = await parseLHKPNPDF(pdf, 'angka-tidak-konsisten.pdf');
+
+    expect(result.status).toBe('Perlu Ditinjau');
+    expect(result.isParsedSuccess).toBe(false);
+    expect(result.consistencyIssues.map((issue) => issue.code)).toContain('subtotal-mismatch');
+    expect(result.errorReason).toContain('tidak sama dengan subtotal');
+  });
+
   it('accepts confirmed all-zero values but flags a missing debt field', () => {
     const allZero = {
       tanah_dan_bangunan: 0,
@@ -240,6 +306,26 @@ describe('PDF text layout parsing', () => {
       missingFields: ['hutang']
     });
   });
+
+  it('flags complete-looking values when their arithmetic does not reconcile', () => {
+    const inconsistent = assessFinancialConsistency({
+      tanah_dan_bangunan: 100_000_000,
+      alat_transportasi_dan_mesin: 20_000_000,
+      harta_bergerak_lainnya: 10_000_000,
+      surat_berharga: 0,
+      kas_dan_setara_kas: 20_000_000,
+      harta_lainnya: 0,
+      subtotal_harta: 160_000_000,
+      hutang: 25_000_000,
+      total_harta_kekayaan: 130_000_000
+    });
+
+    expect(inconsistent.isConsistent).toBe(false);
+    expect(inconsistent.issues.map((issue) => issue.code)).toEqual([
+      'subtotal-mismatch',
+      'net-worth-mismatch'
+    ]);
+  });
 });
 
 describe('Indonesian Money Parsing Utilities', () => {
@@ -248,6 +334,18 @@ describe('Indonesian Money Parsing Utilities', () => {
     expect(parseIndonesianMoney('Rp 400.000.000').value).toBe(400000000);
     expect(parseIndonesianMoney('Rp. 17.596.646.027').value).toBe(17596646027);
     expect(parseIndonesianMoney('R p . 6.177.000.000').value).toBe(6177000000);
+  });
+
+  it('repairs common OCR digit confusion and alternate thousands separators', () => {
+    expect(parseIndonesianMoney('Rp. 8.645.95I.OOO').value).toBe(8_645_951_000);
+    expect(parseIndonesianMoney('Rp 400,000,000').value).toBe(400_000_000);
+    expect(parseIndonesianMoney('Rp. 1.234.000,00').value).toBe(1_234_000);
+    expect(parseIndonesianMoney('R p . 6 177 OOO OOO').value).toBe(6_177_000_000);
+  });
+
+  it('rejects malformed or partial money instead of silently parsing a prefix', () => {
+    expect(parseIndonesianMoney('Rp. 12.34.567').value).toBeNull();
+    expect(parseIndonesianMoney('Rp. 100.000 nilai perkiraan').value).toBeNull();
   });
 
   it('handles zero / dash formats correctly', () => {

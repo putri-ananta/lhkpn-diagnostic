@@ -25,29 +25,66 @@ export function parseIndonesianMoney(raw) {
     return { value: null, rawText, isZeroPattern: false };
   }
 
-  // Check for dash/zero patterns like "----", "Rp. ----", "Rp ----", "0", "-"
-  const strippedDashes = rawText
+  // OCR frequently separates "Rp" and confuses O/0 or I/1. Repairs are only
+  // applied after the currency marker has been removed and only when the rest
+  // of the token is money-shaped, so ordinary words are never rewritten.
+  let moneyText = rawText
+    .normalize('NFKC')
+    .replace(/\u00a0/g, ' ')
     .replace(/R\s*p\s*[.,:]?/gi, '')
-    .replace(/\s+/g, '');
-  if (/^[-—–]+$/.test(strippedDashes) || strippedDashes === '0') {
+    .trim();
+
+  const dashCandidate = moneyText.replace(/[.\s_]/g, '');
+  if (/^[-—–]+$/.test(dashCandidate)) {
     return { value: 0, rawText, isZeroPattern: true };
   }
 
-  // Extract digits
-  // Indonesian format uses '.' as thousands separator and ',' as decimal separator
-  // Remove Rp., dots, spaces
-  let cleaned = rawText
-    .replace(/R\s*p\s*[.,:]?/gi, '')
-    .replace(/\./g, '')
-    .replace(/\s+/g, '')
-    .replace(/,/g, '.');
-
-  const num = parseFloat(cleaned);
-  if (isNaN(num)) {
+  if (!/^[0-9OoQIl|!.,'’\s]+$/.test(moneyText)) {
     return { value: null, rawText, isZeroPattern: false };
   }
 
-  return { value: num, rawText, isZeroPattern: false };
+  moneyText = moneyText
+    .replace(/[OoQ]/g, '0')
+    .replace(/[Il|!]/g, '1')
+    .replace(/['’]/g, '.')
+    .replace(/\s+/g, '');
+
+  if (!/^\d+(?:[.,]\d+)*$/.test(moneyText)) {
+    return { value: null, rawText, isZeroPattern: false };
+  }
+
+  const separators = [...moneyText.matchAll(/[.,]/g)];
+  let normalizedNumber = moneyText;
+
+  if (separators.length > 0) {
+    const groups = moneyText.split(/[.,]/);
+    const lastSeparator = separators.at(-1)?.[0];
+    const lastGroup = groups.at(-1) || '';
+    const earlierGroups = groups.slice(1, -1);
+    const allThousands = groups.slice(1).every((group) => group.length === 3);
+    const hasDecimalTail = lastGroup.length <= 2
+      && (lastSeparator === ',' || earlierGroups.every((group) => group.length === 3));
+
+    if (allThousands) {
+      normalizedNumber = groups.join('');
+    } else if (hasDecimalTail) {
+      const integerPart = groups.slice(0, -1).join('');
+      normalizedNumber = `${integerPart}.${lastGroup}`;
+    } else {
+      return { value: null, rawText, isZeroPattern: false };
+    }
+  }
+
+  const num = Number(normalizedNumber);
+  if (!Number.isFinite(num) || !Number.isSafeInteger(Math.round(num))) {
+    return { value: null, rawText, isZeroPattern: false };
+  }
+
+  return {
+    value: num,
+    rawText,
+    isZeroPattern: num === 0 && /^0+(?:[.,]0+)*$/.test(moneyText)
+  };
 }
 
 /**

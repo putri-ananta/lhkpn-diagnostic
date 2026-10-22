@@ -57,7 +57,9 @@ export function groupTextItemsIntoLines(items) {
 }
 
 async function extractOCRText(page, worker) {
-  const viewport = page.getViewport({ scale: 2 });
+  // A slightly denser render materially improves recognition of separators and
+  // repeated zeroes without making every upload prohibitively slow.
+  const viewport = page.getViewport({ scale: 2.5 });
   const canvas = document.createElement('canvas');
   canvas.width = Math.ceil(viewport.width);
   canvas.height = Math.ceil(viewport.height);
@@ -66,6 +68,33 @@ async function extractOCRText(page, worker) {
   await page.render({ canvasContext: context, viewport }).promise;
   const result = await worker.recognize(canvas);
   return result.data.text || '';
+}
+
+function scoreExtractedPage(lines) {
+  const text = lines.join('\n');
+  const structureCount = [
+    /DATA\s+PRIBADI/i,
+    /DATA\s+HARTA/i,
+    /TANAH\s+DAN\s+BANGUNAN/i,
+    /TOTAL\s+HARTA/i,
+    /(?:HUTANG|UTANG|LIABILITAS)/i
+  ].filter((pattern) => pattern.test(text)).length;
+  const moneyCount = findMoneyTokens(text).length;
+  const replacementCharacterCount = (text.match(/[�□]/g) || []).length;
+
+  return (structureCount * 25) + (Math.min(moneyCount, 12) * 8)
+    + Math.min(text.replace(/\s/g, '').length / 100, 10)
+    - (replacementCharacterCount * 5);
+}
+
+function pageNeedsOCR(lines) {
+  const text = lines.join('\n');
+  const compactLength = text.replace(/\s/g, '').length;
+  const hasFinancialSection = /(?:DATA\s+HARTA|TANAH\s+DAN\s+BANGUNAN|TOTAL\s+HARTA|HUTANG|UTANG)/i.test(text);
+  const moneyCount = findMoneyTokens(text).length;
+  return compactLength < 40
+    || /[�□]/.test(text)
+    || (hasFinancialSection && moneyCount < 2);
 }
 
 /**
@@ -106,7 +135,7 @@ export async function extractPDFTextPages(arrayBuffer, options = {}) {
   ].filter((marker) => marker.test(nativeDocumentText)).length;
   const documentHasStructure = structureMarkers >= 2;
   const needsOCR = enableOCR && (
-    !documentHasStructure || pagesData.some((page) => page.text.replace(/\s/g, '').length < 40)
+    !documentHasStructure || pagesData.some((page) => pageNeedsOCR(page.lines))
   );
 
   if (needsOCR && typeof document !== 'undefined') {
@@ -114,13 +143,17 @@ export async function extractPDFTextPages(arrayBuffer, options = {}) {
     try {
       const { createWorker } = await import('tesseract.js');
       worker = await createWorker('ind', 1);
+      await worker.setParameters?.({ preserve_interword_spaces: '1' });
       for (let index = 0; index < pageTextCandidates.length; index++) {
         const candidate = pageTextCandidates[index];
-        const shouldOCRPage = !documentHasStructure || candidate.lines.join('').replace(/\s/g, '').length < 40;
+        const shouldOCRPage = !documentHasStructure || pageNeedsOCR(candidate.lines);
         if (shouldOCRPage) {
           const ocrText = await extractOCRText(candidate.page, worker);
           const ocrLines = ocrText.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-          if (ocrLines.length > 0) {
+          const nativeScore = scoreExtractedPage(candidate.lines);
+          const ocrScore = scoreExtractedPage(ocrLines);
+          const nativeIsUnreadable = candidate.lines.join('').replace(/\s/g, '').length < 40;
+          if (ocrLines.length > 0 && (nativeIsUnreadable || ocrScore > nativeScore)) {
             pagesData[index].text = ocrLines.join('\n');
             pagesData[index].lines = ocrLines;
             pagesData[index].usedOCR = true;
@@ -139,7 +172,9 @@ export async function extractPDFTextPages(arrayBuffer, options = {}) {
   return pagesData;
 }
 
-const MONEY_TOKEN_SOURCE = String.raw`(?:R\s*[pP]\s*[.,:]?\s*(?:[-—–]{2,}|0|\d{1,3}(?:(?:\.|\s)\s*\d{3})+(?:,\d{1,2})?|\d+(?:,\d{1,2})?)|[-—–]{2,}|\d{1,3}(?:\.\s*\d{3})+(?:,\d{1,2})?)`;
+const OCR_DIGIT_SOURCE = String.raw`[0-9OoQIl|!]`;
+const GROUPED_MONEY_SOURCE = String.raw`${OCR_DIGIT_SOURCE}{1,3}(?:(?:\s*[.,'’]\s*|\s+)${OCR_DIGIT_SOURCE}{3})+(?:\s*[,.]\s*${OCR_DIGIT_SOURCE}{1,2})?`;
+const MONEY_NUMBER_SOURCE = String.raw`(?:${GROUPED_MONEY_SOURCE}|${OCR_DIGIT_SOURCE}+)`;
 
 const SECTION_PATTERNS = {
   tanah_dan_bangunan: [
@@ -186,26 +221,50 @@ function isSectionHeading(line) {
 }
 
 function findMoneyTokens(text) {
-  const tokenRegex = new RegExp(MONEY_TOKEN_SOURCE, 'gi');
-  return [...text.matchAll(tokenRegex)]
-    .map((match) => ({ match, parsed: parseIndonesianMoney(match[0]) }))
-    .filter(({ parsed }) => parsed.value !== null);
+  const patterns = [
+    new RegExp(String.raw`R\s*[pP]\s*[.,:]?\s*(?:[-—–_]+|${OCR_DIGIT_SOURCE}(?:[0-9OoQIl|!.,'’\s]{0,80}${OCR_DIGIT_SOURCE})?)`, 'gi'),
+    new RegExp(String.raw`R\s*[pP]\s*[.,:]?\s*(?:[-—–_]+|${MONEY_NUMBER_SOURCE})`, 'gi'),
+    new RegExp(String.raw`(?:[-—–_]{2,}|${GROUPED_MONEY_SOURCE})`, 'gi')
+  ];
+  const results = [];
+
+  const standaloneParsed = parseIndonesianMoney(text);
+  if (standaloneParsed.value !== null) {
+    const start = Math.max(0, text.search(/\S/));
+    results.push({
+      match: null,
+      parsed: standaloneParsed,
+      start,
+      end: text.length
+    });
+  }
+
+  patterns.forEach((pattern) => {
+    for (const match of text.matchAll(pattern)) {
+      const parsed = parseIndonesianMoney(match[0]);
+      if (parsed.value === null) continue;
+      const start = match.index ?? 0;
+      const end = start + match[0].length;
+      const overlapsExisting = results.some((token) => start < token.end && end > token.start);
+      if (overlapsExisting) continue;
+      results.push({ match, parsed, start, end });
+    }
+  });
+
+  return results.sort((a, b) => a.start - b.start);
 }
 
-/**
- * Extract a category total from the small area between its heading and its details.
- * Official KPK PDFs put the total on the heading line or the next two text lines.
- * Restricting the search to that area prevents item values and neighbouring totals
- * from being mistaken for the category total.
- * @param {string[]} allLines
- * @param {RegExp[]} headingRegexes
- * @param {string} categoryKey - For logging/debugging
- * @returns {{ value: number|null, rawText: string|null, confidence: string, isZero: boolean, matchedLine: string|null }}
- */
-function extractCategoryValue(allLines, headingRegexes, categoryKey = 'unknown') {
+function candidateConfidence(score) {
+  if (score >= 100) return 'high';
+  if (score >= 75) return 'medium';
+  return 'low';
+}
+
+function collectCategoryCandidates(allLines, headingRegexes, categoryKey = 'unknown') {
   const headingIndexes = allLines
     .map((line, index) => matchesAny(line, headingRegexes) ? index : -1)
     .filter((index) => index >= 0);
+  const candidates = [];
 
   for (const headingIndex of headingIndexes) {
     let sectionEnd = allLines.length;
@@ -218,60 +277,203 @@ function extractCategoryValue(allLines, headingRegexes, categoryKey = 'unknown')
 
     let detailStart = sectionEnd;
     for (let index = headingIndex + 1; index < sectionEnd; index++) {
-      if (/^\s*\d+\s*[.)]\s+/.test(allLines[index])) {
+      if (/^\s*\d+\s*[.)](?:\s+[A-Za-zÀ-ÿ]|\s*$)/.test(allLines[index])) {
         detailStart = index;
         break;
       }
     }
 
-    const primaryEnd = Math.min(sectionEnd, detailStart, headingIndex + 5);
-    const primaryLines = allLines.slice(headingIndex, primaryEnd);
-    const tokens = findMoneyTokens(primaryLines.join(' '));
-    if (tokens.length > 0) {
-      const { parsed } = tokens[0];
-      return {
-        value: parsed.value,
-        rawText: parsed.rawText,
-        confidence: 'high',
-        isZero: parsed.isZeroPattern || parsed.value === 0,
-        matchedLine: allLines[headingIndex],
-        matchedIndex: headingIndex,
-        categoryKey
-      };
-    }
+    for (let lineIndex = headingIndex; lineIndex < sectionEnd; lineIndex++) {
+      const line = allLines[lineIndex];
+      const tokens = findMoneyTokens(line);
+      const explicitTotal = /\b(?:SUB\s*TOTAL|TOTAL|JUMLAH|NILAI)\b/i.test(line);
+      const isItemArea = lineIndex >= detailStart;
+      const isItemLine = /^\s*\d+\s*[.)](?:\s+[A-Za-zÀ-ÿ]|\s*$)/.test(line);
+      const distance = lineIndex - headingIndex;
 
-    // Some OCR output loses the "Rp" token but keeps a grouped number. Search a
-    // few more lines inside the same section only, never across the next heading.
-    const fallbackLines = allLines.slice(headingIndex, Math.min(sectionEnd, detailStart, headingIndex + 8));
-    const fallbackTokens = findMoneyTokens(fallbackLines.join(' '));
-    if (fallbackTokens.length > 0) {
-      const { parsed } = fallbackTokens[0];
-      return {
-        value: parsed.value,
-        rawText: parsed.rawText,
-        confidence: 'medium',
-        isZero: parsed.isZeroPattern || parsed.value === 0,
-        matchedLine: allLines[headingIndex],
-        matchedIndex: headingIndex,
-        categoryKey
-      };
+      tokens.forEach(({ parsed, start }, tokenIndex) => {
+        let score;
+        let strategy;
+
+        if (lineIndex === headingIndex) {
+          score = 120 - (tokenIndex * 8);
+          strategy = 'heading-line';
+        } else if (explicitTotal) {
+          score = 118 - Math.min(distance, 12);
+          strategy = 'explicit-total';
+        } else if (!isItemArea && distance <= 6) {
+          score = 110 - (distance * 4) - (tokenIndex * 5);
+          strategy = 'before-details';
+        } else {
+          const textOutsideToken = `${line.slice(0, start)} ${line.slice(start + parsed.rawText.length)}`
+            .replace(/[\s:()=.,-]/g, '');
+          const isStandaloneAmount = textOutsideToken.length === 0;
+          const nearSectionEnd = lineIndex >= sectionEnd - 3;
+
+          if (isStandaloneAmount && nearSectionEnd) {
+            score = 82;
+            strategy = 'section-tail';
+          } else if (isStandaloneAmount) {
+            score = 62;
+            strategy = 'standalone-in-details';
+          } else {
+            score = 42;
+            strategy = 'detail-line';
+          }
+          if (isItemLine) score -= 15;
+        }
+
+        candidates.push({
+          value: parsed.value,
+          rawText: parsed.rawText,
+          isZero: parsed.isZeroPattern || parsed.value === 0,
+          matchedLine: allLines[headingIndex],
+          extractedLine: line,
+          matchedIndex: lineIndex,
+          headingIndex,
+          categoryKey,
+          strategy,
+          score,
+          confidence: candidateConfidence(score)
+        });
+      });
     }
   }
 
+  const seen = new Set();
+  return candidates
+    .sort((a, b) => b.score - a.score || a.matchedIndex - b.matchedIndex)
+    .filter((candidate) => {
+      const fingerprint = `${candidate.headingIndex}:${candidate.matchedIndex}:${candidate.value}:${candidate.rawText}`;
+      if (seen.has(fingerprint)) return false;
+      seen.add(fingerprint);
+      return true;
+    });
+}
+
+const ASSET_CATEGORY_KEYS = [
+  'tanah_dan_bangunan',
+  'alat_transportasi_dan_mesin',
+  'harta_bergerak_lainnya',
+  'surat_berharga',
+  'kas_dan_setara_kas',
+  'harta_lainnya'
+];
+
+function reconcileCategorySubtotal(selected, candidatesByKey) {
+  const currentCandidates = [...ASSET_CATEGORY_KEYS, 'subtotal_harta'].map((key) => selected[key]);
+  if (currentCandidates.some((candidate) => !candidate)) return;
+
+  const currentSum = ASSET_CATEGORY_KEYS.reduce((sum, key) => sum + selected[key].value, 0);
+  if (Math.abs(currentSum - selected.subtotal_harta.value) <= 1) return;
+
+  const candidateLists = [...ASSET_CATEGORY_KEYS, 'subtotal_harta']
+    .map((key) => candidatesByKey[key].slice(0, 3));
+  if (candidateLists.some((list) => list.length === 0)) return;
+
+  const currentQuality = currentCandidates.reduce((sum, candidate) => sum + candidate.score, 0);
+  let bestExact = null;
+
+  const visit = (depth, combination) => {
+    if (depth === candidateLists.length) {
+      const categorySum = combination.slice(0, ASSET_CATEGORY_KEYS.length)
+        .reduce((sum, candidate) => sum + candidate.value, 0);
+      const subtotalCandidate = combination.at(-1);
+      if (Math.abs(categorySum - subtotalCandidate.value) > 1) return;
+      const quality = combination.reduce((sum, candidate) => sum + candidate.score, 0);
+      if (!bestExact || quality > bestExact.quality) bestExact = { combination: [...combination], quality };
+      return;
+    }
+    candidateLists[depth].forEach((candidate) => visit(depth + 1, [...combination, candidate]));
+  };
+
+  visit(0, []);
+  if (!bestExact || bestExact.quality < currentQuality - 45) return;
+
+  [...ASSET_CATEGORY_KEYS, 'subtotal_harta'].forEach((key, index) => {
+    const candidate = bestExact.combination[index];
+    if (selected[key] !== candidate) selected[key] = { ...candidate, reconciledBy: 'subtotal' };
+  });
+}
+
+function reconcileSubtotalDebtTotal(selected, candidatesByKey) {
+  const keys = ['subtotal_harta', 'hutang', 'total_harta_kekayaan'];
+  if (keys.some((key) => !selected[key])) return;
+  if (Math.abs(selected.subtotal_harta.value - selected.hutang.value - selected.total_harta_kekayaan.value) <= 1) return;
+
+  const candidateLists = keys.map((key) => candidatesByKey[key].slice(0, 4));
+  const currentQuality = keys.reduce((sum, key) => sum + selected[key].score, 0);
+  let bestExact = null;
+
+  candidateLists[0].forEach((subtotalCandidate) => {
+    candidateLists[1].forEach((debtCandidate) => {
+      candidateLists[2].forEach((totalCandidate) => {
+        if (Math.abs(subtotalCandidate.value - debtCandidate.value - totalCandidate.value) > 1) return;
+        const combination = [subtotalCandidate, debtCandidate, totalCandidate];
+        const quality = combination.reduce((sum, candidate) => sum + candidate.score, 0);
+        if (!bestExact || quality > bestExact.quality) bestExact = { combination, quality };
+      });
+    });
+  });
+
+  if (!bestExact || bestExact.quality < currentQuality - 35) return;
+  keys.forEach((key, index) => {
+    const candidate = bestExact.combination[index];
+    if (selected[key] !== candidate) selected[key] = { ...candidate, reconciledBy: 'net-worth' };
+  });
+}
+
+function materializeCategoryResult(candidate, alternatives, categoryKey) {
+  if (!candidate) {
+    return {
+      value: null,
+      rawText: null,
+      confidence: 'low',
+      isZero: false,
+      matchedLine: null,
+      extractedLine: null,
+      matchedIndex: null,
+      categoryKey,
+      strategy: 'not-found',
+      alternatives: []
+    };
+  }
+
   return {
-    value: null,
-    rawText: null,
-    confidence: 'low',
-    isZero: false,
-    matchedLine: null,
-    matchedIndex: null,
-    categoryKey
+    ...candidate,
+    confidence: candidate.reconciledBy ? 'medium' : candidate.confidence,
+    alternatives: alternatives
+      .filter((alternative) => !(
+        alternative.matchedIndex === candidate.matchedIndex
+        && alternative.value === candidate.value
+        && alternative.rawText === candidate.rawText
+      ))
+      .slice(0, 3)
+      .map(({ value, rawText, extractedLine, confidence, strategy }) => ({
+        value,
+        rawText,
+        extractedLine,
+        confidence,
+        strategy
+      }))
   };
 }
 
 export function extractCategoryValuesFromLines(allLines) {
+  const candidatesByKey = Object.fromEntries(
+    Object.entries(SECTION_PATTERNS)
+      .map(([key, patterns]) => [key, collectCategoryCandidates(allLines, patterns, key)])
+  );
+  const selected = Object.fromEntries(
+    Object.entries(candidatesByKey).map(([key, candidates]) => [key, candidates[0] || null])
+  );
+
+  reconcileCategorySubtotal(selected, candidatesByKey);
+  reconcileSubtotalDebtTotal(selected, candidatesByKey);
+
   return Object.fromEntries(
-    Object.entries(SECTION_PATTERNS).map(([key, patterns]) => [key, extractCategoryValue(allLines, patterns, key)])
+    Object.keys(SECTION_PATTERNS)
+      .map((key) => [key, materializeCategoryResult(selected[key], candidatesByKey[key], key)])
   );
 }
 
@@ -349,6 +551,37 @@ export function assessFinancialCompleteness(assets) {
   };
 }
 
+/** Catch plausible-looking OCR values that do not satisfy the report totals. */
+export function assessFinancialConsistency(assets) {
+  const issues = [];
+  const categoryValues = ASSET_CATEGORY_KEYS.map((key) => assets?.[key]);
+  const hasAllCategories = categoryValues.every((value) => value !== null && value !== undefined);
+
+  if (hasAllCategories && assets?.subtotal_harta !== null && assets?.subtotal_harta !== undefined) {
+    const categorySum = categoryValues.reduce((sum, value) => sum + value, 0);
+    if (Math.abs(categorySum - assets.subtotal_harta) > 1) {
+      issues.push({
+        code: 'subtotal-mismatch',
+        message: `Jumlah enam kategori (Rp ${categorySum.toLocaleString('id-ID')}) tidak sama dengan subtotal (Rp ${assets.subtotal_harta.toLocaleString('id-ID')}).`
+      });
+    }
+  }
+
+  const hasNetWorthInputs = ['subtotal_harta', 'hutang', 'total_harta_kekayaan']
+    .every((key) => assets?.[key] !== null && assets?.[key] !== undefined);
+  if (hasNetWorthInputs) {
+    const calculatedTotal = assets.subtotal_harta - assets.hutang;
+    if (Math.abs(calculatedTotal - assets.total_harta_kekayaan) > 1) {
+      issues.push({
+        code: 'net-worth-mismatch',
+        message: `Subtotal dikurangi hutang (Rp ${calculatedTotal.toLocaleString('id-ID')}) tidak sama dengan total harta kekayaan (Rp ${assets.total_harta_kekayaan.toLocaleString('id-ID')}).`
+      });
+    }
+  }
+
+  return { isConsistent: issues.length === 0, issues };
+}
+
 /**
  * Main function to parse an LHKPN PDF file ArrayBuffer
  * @param {ArrayBuffer} arrayBuffer
@@ -382,6 +615,12 @@ export async function parseLHKPNPDF(arrayBuffer, fileName = 'LHKPN.pdf') {
     addLog('Mengekstrak kategori harta dan liabilitas...');
 
     const extractedCategories = extractCategoryValuesFromLines(allLines);
+    const reconciledFields = Object.entries(extractedCategories)
+      .filter(([, detail]) => detail.reconciledBy)
+      .map(([key, detail]) => `${key} (${detail.reconciledBy})`);
+    if (reconciledFields.length > 0) {
+      addLog(`Kandidat angka ambigu diselesaikan dengan pemeriksaan aritmetika: ${reconciledFields.join(', ')}.`, 'warning');
+    }
     const tanahObj = extractedCategories.tanah_dan_bangunan;
     const transportObj = extractedCategories.alat_transportasi_dan_mesin;
     const bergerakObj = extractedCategories.harta_bergerak_lainnya;
@@ -463,11 +702,16 @@ export async function parseLHKPNPDF(arrayBuffer, fileName = 'LHKPN.pdf') {
       total_harta_kekayaan: total
     };
 
-    const { isSuccess, missingFields } = assessFinancialCompleteness(assets);
+    const { isSuccess: isComplete, missingFields } = assessFinancialCompleteness(assets);
+    const { isConsistent, issues: consistencyIssues } = assessFinancialConsistency(assets);
+    const isSuccess = isComplete && isConsistent;
     const statusLabel = isSuccess ? 'Selesai' : 'Perlu Ditinjau';
 
-    if (!isSuccess) {
+    consistencyIssues.forEach((issue) => addLog(issue.message, 'warning'));
+    if (!isComplete) {
       addLog('Sebagian kategori atau nilai total dokumen tidak dapat dibaca dengan yakin.', 'warning');
+    } else if (!isConsistent) {
+      addLog('Semua nilai terbaca, tetapi hasilnya tidak lolos pemeriksaan aritmetika. Dokumen perlu ditinjau.', 'warning');
     } else {
       addLog('Ekstraksi data LHKPN berhasil diselesaikan.');
     }
@@ -476,12 +720,15 @@ export async function parseLHKPNPDF(arrayBuffer, fileName = 'LHKPN.pdf') {
       fileName,
       isParsedSuccess: isSuccess,
       status: statusLabel,
-      errorReason: !isSuccess
+      errorReason: !isComplete
         ? `${missingFields.length} nilai keuangan tidak terbaca (${missingFields.join(', ')}).`
-        : undefined,
+        : !isConsistent
+          ? consistencyIssues.map((issue) => issue.message).join(' ')
+          : undefined,
       identity,
       assets,
       categoryDetails,
+      consistencyIssues,
       logs: parsingLogs,
       parsedAt: new Date().toISOString()
     };
